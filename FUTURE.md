@@ -141,3 +141,45 @@ long as the file is mounted into the container.
 **Sketch:** A factory `ViceContainer.from_tune(path)` that picks the
 right mount + autostart args based on file extension and exposes a
 typed `media_kind: Literal["d64", "prg", "tap"]` attribute.
+
+## Unit-test coverage of the chord-driven write paths
+
+**Goal:** Bring the chord-driven `field_setter.write_*` and the
+`keyhandler.press` / `press_via_loop` paths under unit-test coverage.
+
+**Sketch:** These functions are not pure but they all funnel through
+`BinMon.mem_set` / `mem_get` / `run_until_pc`. A `FakeBinMon` that
+records mem writes and returns scripted mem-reads would let a unit
+test assert "press(KEY=X, mod1=MOD_CTRL) writes $0E44=$30,
+$0E41=$04, then sets PC=$CFE0" without a docker container in the
+loop. The same fake unlocks `coverage.measure`, `sidtab.SidTab.commit`,
+and most of `tune_navigation`.
+
+**Where to start:** A `tests/unit/_fake_binmon.py` shim that
+implements the same surface as `BinMon` (mem_get, mem_set,
+checkpoint_set, checkpoint_list, registers_get/set, run_until_pc).
+About 100 lines.
+
+## Stable container name suffix when the harness runs in parallel
+
+**Goal:** Replace the time-based suffix in `ViceContainer.__post_init__`
+with one that's unique across distinct *machines / threads* too.
+
+**Sketch:** The current ns-suffix is unique within one process but
+two harness processes started in the same nanosecond (rare but
+possible under a CI fan-out) would still collide. Add a
+`secrets.token_hex(3)` suffix on top of the ns counter, or accept a
+caller-supplied `name_prefix` and document the rest as
+implementation detail.
+
+## Hex-grid `screen.find_text` extension to color RAM
+
+**Goal:** Add a `find_color(needle_color, ...)` helper that returns
+the (row, col) of the first cell whose color RAM matches a given
+nibble — useful for asserting that defMON's border-flash super-
+command state is active without parsing the ASCII grid.
+
+**Sketch:** `ScreenSnapshot.color_at()` already exists; the new
+helper is a 6-line loop over rows/cols comparing against the target
+nibble. Pairs with `find_text` for "the first SUPER-mode highlighted
+cell" queries.

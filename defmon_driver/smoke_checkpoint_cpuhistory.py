@@ -82,8 +82,7 @@ def test_checkpoint_lifecycle(bm: BinMon, d: Defmon) -> list[str]:
     print(f"  after F1: hit_count={after.hit_count}")
     if after.hit_count == 0:
         failures.append(
-            "checkpoint never fired after F1 — player range wrong, "
-            "or checkpoint plumbing broken"
+            "checkpoint never fired after F1 — player range wrong, or checkpoint plumbing broken"
         )
 
     # Stop playback so we don't keep filling cpuhistory with player loop.
@@ -92,9 +91,7 @@ def test_checkpoint_lifecycle(bm: BinMon, d: Defmon) -> list[str]:
 
     # checkpoint_list should see this one.
     listed = bm.checkpoint_list()
-    print(
-        f"  list: {len(listed)} checkpoint(s); checknums={[c.checknum for c in listed]}"
-    )
+    print(f"  list: {len(listed)} checkpoint(s); checknums={[c.checknum for c in listed]}")
     if not any(c.checknum == cp.checknum for c in listed):
         failures.append(f"our checknum {cp.checknum} missing from list")
 
@@ -138,9 +135,7 @@ def test_cpuhistory(bm: BinMon) -> list[str]:
     # Sanity: cycle should be monotone non-decreasing across records.
     cycles = [r.cycle for r in history]
     decreases = [
-        (i, cycles[i - 1], cycles[i])
-        for i in range(1, len(cycles))
-        if cycles[i] < cycles[i - 1]
+        (i, cycles[i - 1], cycles[i]) for i in range(1, len(cycles)) if cycles[i] < cycles[i - 1]
     ]
     if decreases:
         failures.append(f"{len(decreases)} cycle decrease(s); first: {decreases[0]}")
@@ -154,9 +149,7 @@ def test_cpuhistory(bm: BinMon) -> list[str]:
         if not required.issubset(r.registers)
     ]
     if missing:
-        failures.append(
-            f"{len(missing)} records missing core regs; first: {missing[0]}"
-        )
+        failures.append(f"{len(missing)} records missing core regs; first: {missing[0]}")
 
     return failures
 

@@ -99,9 +99,7 @@ def run(d64_path: Path, port: int) -> int:
                 f"pages over ${cov.start:04x}-${cov.end:04x}"
             )
             if cov.page_count != EXPECTED_PAGE_COUNT:
-                failures.append(
-                    f"expected {EXPECTED_PAGE_COUNT} pages, got {cov.page_count}"
-                )
+                failures.append(f"expected {EXPECTED_PAGE_COUNT} pages, got {cov.page_count}")
 
             section("MEASURE: idle baseline")
             ac_idle = cov.measure_idle(duration=0.5)
@@ -152,10 +150,7 @@ def run(d64_path: Path, port: int) -> int:
         # leaked from a prior run on a re-used container) is the caller's
         # problem, not ours — but we shouldn't have added to it.
         remaining = bm.checkpoint_list()
-        print(
-            f"  after remove(): {len(remaining)} checkpoint(s) live "
-            f"({len(pre)} pre-existing)"
-        )
+        print(f"  after remove(): {len(remaining)} checkpoint(s) live ({len(pre)} pre-existing)")
         if len(remaining) > len(pre):
             failures.append(f"leak: {len(remaining)} > {len(pre)} pre-existing")
 

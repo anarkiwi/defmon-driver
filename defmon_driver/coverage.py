@@ -302,15 +302,11 @@ class Coverage:
         cycle_before = before_hist[0].cycle if before_hist else 0
 
         action()
-        immediate_hist = self.bm.cpuhistory_get(
-            count=self.history_count, memspace=self.memspace
-        )
+        immediate_hist = self.bm.cpuhistory_get(count=self.history_count, memspace=self.memspace)
         if settle > 0:
             time.sleep(settle)
 
-        after_hist = self.bm.cpuhistory_get(
-            count=self.history_count, memspace=self.memspace
-        )
+        after_hist = self.bm.cpuhistory_get(count=self.history_count, memspace=self.memspace)
         after = self.snapshot_hits()
 
         diff = self.diff_hits(before, after)
@@ -330,9 +326,7 @@ class Coverage:
         )
 
         last_rec = (
-            after_hist[-1]
-            if after_hist
-            else (immediate_hist[-1] if immediate_hist else None)
+            after_hist[-1] if after_hist else (immediate_hist[-1] if immediate_hist else None)
         )
         cycle_after = last_rec.cycle if last_rec else cycle_before
         cycles_elapsed = max(0, cycle_after - cycle_before)

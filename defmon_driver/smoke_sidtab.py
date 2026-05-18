@@ -50,9 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         default=".GLOW WORM",
         help="example-tune name in defmon_driver.tune_manifest",
     )
-    p.add_argument(
-        "--d64", required=True, help="path to defMON d64 image containing the tune"
-    )
+    p.add_argument("--d64", required=True, help="path to defMON d64 image containing the tune")
     p.add_argument("--cal", default="sidtab_calibration.json")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
@@ -137,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         acid_cols = st.column("ACID").cell_cols
         acid_values = cell_codes(d, 0, acid_cols, data_row + 0)
         log.info(
-            "ACID row 0 cells: %s " "(expect 0,2,0,0 or rev-video equivalents)",
+            "ACID row 0 cells: %s (expect 0,2,0,0 or rev-video equivalents)",
             [hex(v) for v in acid_values],
         )
 

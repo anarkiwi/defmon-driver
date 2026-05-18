@@ -232,9 +232,7 @@ class BinMon:
 
     # ---- lifecycle -----------------------------------------------------
 
-    def connect(
-        self, timeout: float = 5.0, attempts: int = 50, retry_delay: float = 0.2
-    ) -> None:
+    def connect(self, timeout: float = 5.0, attempts: int = 50, retry_delay: float = 0.2) -> None:
         """Open the socket. Retries on connection failure AND on early
         close-by-peer — docker-proxy accepts on the host port before the
         container's x64sc has bound inside, so the first few connects can
@@ -258,9 +256,7 @@ class BinMon:
                         pass
                 self._sock = None
                 time.sleep(retry_delay)
-        raise BinmonError(
-            f"could not connect to binmon at {self.host}:{self.port}: {last_err}"
-        )
+        raise BinmonError(f"could not connect to binmon at {self.host}:{self.port}: {last_err}")
 
     def close(self) -> None:
         if self._sock is not None:
@@ -337,9 +333,7 @@ class BinMon:
         require_ok: bool = True,
         timeout: float = 5.0,
     ) -> BinmonResponse:
-        return self._call_inner(
-            opcode, body, require_ok, timeout, auto_resume=self.auto_resume
-        )
+        return self._call_inner(opcode, body, require_ok, timeout, auto_resume=self.auto_resume)
 
     def call_keep_halted(
         self,
@@ -400,15 +394,11 @@ class BinMon:
                 deadline = time.monotonic() + timeout
                 while True:
                     if time.monotonic() > deadline:
-                        raise BinmonError(
-                            f"timeout waiting for response to opcode {opcode:#x}"
-                        )
+                        raise BinmonError(f"timeout waiting for response to opcode {opcode:#x}")
                     resp = self._read_response()
                     if resp.req_id == req_id:
                         if require_ok and resp.err != ERR_OK:
-                            raise BinmonError(
-                                f"opcode {opcode:#x} returned err {resp.err:#x}"
-                            )
+                            raise BinmonError(f"opcode {opcode:#x} returned err {resp.err:#x}")
                         # Send EXIT (CPU resume) after each command unless this
                         # call was itself EXIT (avoid infinite recursion) or the
                         # caller asked to stay halted.
@@ -421,10 +411,7 @@ class BinMon:
                                 ex = self._read_response()
                                 if ex.req_id == exit_req:
                                     break
-                                if (
-                                    self.on_event is not None
-                                    and ex.req_id == 0xFFFFFFFF
-                                ):
+                                if self.on_event is not None and ex.req_id == 0xFFFFFFFF:
                                     try:
                                         self.on_event(ex)
                                     except Exception:  # noqa: BLE001
@@ -478,9 +465,7 @@ class BinMon:
         if not data:
             return
         end = start + len(data) - 1
-        body = struct.pack(
-            "<BHHBH", int(side_effects), start, end, memspace, bank
-        ) + bytes(data)
+        body = struct.pack("<BHHBH", int(side_effects), start, end, memspace, bank) + bytes(data)
         self.call(OPCODE.MEM_SET, body)
 
     # ---- CPU registers (REGISTERS_GET 0x31 / REGISTERS_SET 0x32) ------
@@ -515,9 +500,7 @@ class BinMon:
 
     # ---- single-shot execution helpers --------------------------------
 
-    def advance_instructions(
-        self, count: int = 1, step_over_subroutines: bool = False
-    ) -> None:
+    def advance_instructions(self, count: int = 1, step_over_subroutines: bool = False) -> None:
         """ADVANCE_INSTRUCTIONS (0x71). Steps the CPU by `count` instructions
         while keeping it halted (no auto-resume)."""
         body = struct.pack("<BH", int(step_over_subroutines), count)
@@ -643,9 +626,7 @@ class BinMon:
             except BinmonError:
                 pass
 
-    def autostart(
-        self, path: bytes | str, run_after: bool = True, file_index: int = 0
-    ) -> None:
+    def autostart(self, path: bytes | str, run_after: bool = True, file_index: int = 0) -> None:
         """Autostart a disk/PRG image at runtime. path may be PETSCII bytes
         or a UTF-8 str (will be encoded to ASCII)."""
         if isinstance(path, str):
@@ -724,9 +705,7 @@ class BinMon:
         """Sticky bit-set. keys = [(row, col, value), ...] (value 0/1).
         row may be a negative custom-key sentinel (e.g. -3 for RESTORE)."""
         keys = list(keys)
-        body = bytes([len(keys)]) + b"".join(
-            struct.pack("<bbB", r, c, v) for r, c, v in keys
-        )
+        body = bytes([len(keys)]) + b"".join(struct.pack("<bbB", r, c, v) for r, c, v in keys)
         self.call(OPCODE.KEYMATRIX_SET, body)
 
     def keymatrix_release_all(self) -> None:
@@ -890,9 +869,7 @@ class BinMon:
                                 if ex.req_id == exit_req:
                                     break
                         return checkpoints
-                    raise BinmonError(
-                        f"unexpected opcode {resp.opcode:#x} in checkpoint_list"
-                    )
+                    raise BinmonError(f"unexpected opcode {resp.opcode:#x} in checkpoint_list")
             finally:
                 self._sock.settimeout(old_to)
 

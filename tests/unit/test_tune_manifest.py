@@ -26,9 +26,7 @@ def test_dir_indices_are_strictly_increasing_per_image() -> None:
     # — otherwise the disk-menu cursor walk would loop back.
     for image in {t.image for t in TUNES}:
         idxs = [t.dir_index for t in tunes_for_image(image)]
-        assert idxs == sorted(
-            set(idxs)
-        ), f"dir_index not strictly increasing in {image}: {idxs}"
+        assert idxs == sorted(set(idxs)), f"dir_index not strictly increasing in {image}: {idxs}"
 
 
 def test_tune_entry_fields_present() -> None:

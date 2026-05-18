@@ -106,9 +106,7 @@ def parse_screen_response(body: bytes) -> ScreenSnapshot:
         raise ValueError(f"screen payload short: {len(payload)} of {PAYLOAD_BYTES}")
     screen = payload[:SCREEN_BYTES]
     color = payload[SCREEN_BYTES : SCREEN_BYTES + COLOR_BYTES]
-    charset = payload[
-        SCREEN_BYTES + COLOR_BYTES : SCREEN_BYTES + COLOR_BYTES + CHARSET_BYTES
-    ]
+    charset = payload[SCREEN_BYTES + COLOR_BYTES : SCREEN_BYTES + COLOR_BYTES + CHARSET_BYTES]
     return ScreenSnapshot(
         vic_mode=h[0],
         rows=h[1],

@@ -124,9 +124,7 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
         print(f"  id    : {container.container_id}")
         print(f"  binmon: 127.0.0.1:{port}")
 
-        bm = BinMon(
-            "127.0.0.1", port, on_event=lambda r: log.debug("event %#x", r.opcode)
-        )
+        bm = BinMon("127.0.0.1", port, on_event=lambda r: log.debug("event %#x", r.opcode))
         bm.connect(timeout=10.0, attempts=80, retry_delay=0.25)
         bm.exit()  # release the initial STOPPED so the CPU runs and defMON autoboots
 
@@ -170,6 +168,11 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
         for name, fn in d.all_documented_actions():
             try:
                 outcome = fn()
+                if outcome is None:
+                    # super_* multi-step helpers return None — no single
+                    # TapOutcome to inspect. Treat as ok if no exception.
+                    print(f"  {name:30s} {'ok':>8s}  (multi-tap; no TapOutcome)")
+                    continue
                 keymatrix_stats.append((name, outcome.cia1_reads_sampling))
                 # In FIXED mode (the default), RELEASE_TIMEOUT is the
                 # expected normal outcome — the chord was held for the
@@ -181,9 +184,7 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
                     failures.append(f"{name}: defMON never read the matrix")
                 else:
                     marker = "ok"
-                print(
-                    f"  {name:30s} {marker:>8s}  cia1_sampled={outcome.cia1_reads_sampling}"
-                )
+                print(f"  {name:30s} {marker:>8s}  cia1_sampled={outcome.cia1_reads_sampling}")
             except Exception as e:  # noqa: BLE001
                 failures.append(f"{name}: {e}")
                 print(f"  {name:30s}     FAIL  {e}")
@@ -197,9 +198,7 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
             d.super_zone_all()
             time.sleep(0.2)
             d.super_exit()
-            print(
-                "  super_steps(8) / super_repeat(2) / super_width(1) / zone_all / exit OK"
-            )
+            print("  super_steps(8) / super_repeat(2) / super_width(1) / zone_all / exit OK")
         except Exception as e:  # noqa: BLE001
             failures.append(f"super commands: {e}")
             print(f"  super commands FAIL {e}")
@@ -237,15 +236,11 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
             after = d.screen().text()
             if before == after:
                 failures.append(
-                    "seqED edits (note/sound_program/speed) produced no "
-                    "visible screen change"
+                    "seqED edits (note/sound_program/speed) produced no visible screen change"
                 )
                 print("  FAIL — screen unchanged after edits")
             else:
-                print(
-                    "  ok — screen text changed after note + "
-                    "sound_program(01) + speed(02)"
-                )
+                print("  ok — screen text changed after note + sound_program(01) + speed(02)")
         except Exception as e:  # noqa: BLE001
             failures.append(f"seqED edits: {e}")
             print(f"  FAIL — {e}")
@@ -265,9 +260,7 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
             time.sleep(0.2)
             after = d.screen().text()
             if before == after:
-                failures.append(
-                    "sidTAB edit (cursor+hex) produced no visible " "screen change"
-                )
+                failures.append("sidTAB edit (cursor+hex) produced no visible screen change")
                 print("  FAIL — screen unchanged after sidTAB edit")
             else:
                 print("  ok — sidTAB cell updated after hex byte 0xAF")
@@ -292,9 +285,7 @@ def run(d64_path: Path, port: int, keep_container: bool) -> int:
             time.sleep(0.2)
             after = d.screen().text()
             if before == after:
-                failures.append(
-                    "seqLIST edit (pattern entry) produced no visible " "screen change"
-                )
+                failures.append("seqLIST edit (pattern entry) produced no visible screen change")
                 print("  FAIL — screen unchanged after seqLIST edit")
             else:
                 print("  ok — seqLIST voice 0 pattern entry updated to $01")
@@ -371,9 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("d64", help="path to defMON .d64 image")
     p.add_argument("--port", type=int, default=6502, help="host binmon port")
-    p.add_argument(
-        "--keep", action="store_true", help="leave container running on exit"
-    )
+    p.add_argument("--keep", action="store_true", help="leave container running on exit")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
 

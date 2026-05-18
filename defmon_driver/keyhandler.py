@@ -33,8 +33,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 from .binmon import BinMon
+
+if TYPE_CHECKING:
+    from .defmon import Defmon
 
 # --- defMON RAM addresses ---
 ADDR_MODE = 0x7167  # current modal context
@@ -223,10 +227,7 @@ def press(
             # Recent CPU history
             try:
                 hist = bm.cpuhistory_get(20)
-                print(
-                    "    [verbose] Last 20 PCs: "
-                    + " ".join(f"${h.pc:04X}" for h in hist[-20:])
-                )
+                print("    [verbose] Last 20 PCs: " + " ".join(f"${h.pc:04X}" for h in hist[-20:]))
             except Exception as he:
                 print(f"    [verbose] cpuhistory failed: {he}")
         raise
@@ -363,9 +364,7 @@ def press_via_loop(
             if not 0 <= _step <= 0x1F:
                 raise ValueError(f"cursor step must be 0..31, got {_step}")
             if not 0 <= arranger_row <= 0x7F:
-                raise ValueError(
-                    f"arranger_row must be 0..0x7F, got " f"{arranger_row}"
-                )
+                raise ValueError(f"arranger_row must be 0..0x7F, got {arranger_row}")
 
             # SID#2 voices proxy through the SID#1 voice selector with
             # the same index (V3→V0, V4→V1, V5→V2). Selector value goes
@@ -601,7 +600,7 @@ def capture_keycode_via_checkpoint(
     bm: BinMon,
     key_name: str,
     *,
-    d=None,  # type: ignore[name-defined]
+    d: Optional["Defmon"] = None,
     timeout: float = 2.0,
 ) -> int | None:
     """Issue a real key tap and capture the value defMON's scanner wrote
@@ -611,15 +610,9 @@ def capture_keycode_via_checkpoint(
     `d` must be a Defmon instance for the tap. Returns the captured byte
     or None if the checkpoint never fired within the timeout.
     """
-    from .defmon import (
-        Defmon,
-    )  # noqa: F401  (kept for type hint; import side-effect free)
-
     if d is None:
         raise ValueError("Defmon instance required")
-    cp = bm.checkpoint_set(
-        0x0EFA, op=0x04, stop_when_hit=True, enabled=True, temporary=True
-    )
+    cp = bm.checkpoint_set(0x0EFA, op=0x04, stop_when_hit=True, enabled=True, temporary=True)
     try:
         # Tap (release will time out — but the press will fire the
         # checkpoint as soon as the scanner runs).

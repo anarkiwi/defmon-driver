@@ -37,17 +37,11 @@ TUNES: tuple[TuneEntry, ...] = (
     TuneEntry("defmon-withtunes.d64", ".HIVE MACHINES", 18, 5, 2, "ILKKE", dir_index=5),
     TuneEntry("defmon-withtunes.d64", ".VACUOLE", 43, 6, 16, "ILKKE", dir_index=6),
     TuneEntry("defmon-withtunes.d64", ".RADIO ROBON95", 21, 8, 4, "ILKKE", dir_index=7),
-    TuneEntry(
-        "defmon-withtunes.d64", ".F7SUS4-NGC1277", 16, 9, 4, "F7SUS4", dir_index=11
-    ),
-    TuneEntry(
-        "defmon-withtunes.d64", ".MONDAYNIGHT2017", 35, 10, 20, "GOTO80", dir_index=15
-    ),
+    TuneEntry("defmon-withtunes.d64", ".F7SUS4-NGC1277", 16, 9, 4, "F7SUS4", dir_index=11),
+    TuneEntry("defmon-withtunes.d64", ".MONDAYNIGHT2017", 35, 10, 20, "GOTO80", dir_index=15),
     TuneEntry("defmon-withtunes.d64", ".DANSA IN", 29, 11, 15, "GOTO80", dir_index=16),
     TuneEntry("defmon-withtunes.d64", ".MATSAM0T", 30, 13, 8, "GOTO80", dir_index=17),
-    TuneEntry(
-        "defmon-withtunes.d64", ".AUTOMATAS2017", 69, 14, 11, "GOTO80", dir_index=18
-    ),
+    TuneEntry("defmon-withtunes.d64", ".AUTOMATAS2017", 69, 14, 11, "GOTO80", dir_index=18),
 )
 
 

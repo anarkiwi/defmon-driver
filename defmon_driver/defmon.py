@@ -482,9 +482,7 @@ class Defmon:
     def select_sid_chip(self, chip: int) -> None:
         """Idempotent chip-view selection. chip must be 1 or 2."""
         if chip not in (1, 2):
-            raise DefmonError(
-                f"select_sid_chip(chip): chip must be 1 or 2; got {chip!r}"
-            )
+            raise DefmonError(f"select_sid_chip(chip): chip must be 1 or 2; got {chip!r}")
         if self.current_sid_chip() == chip:
             return
         want = 1 if chip == 2 else 0
@@ -502,8 +500,7 @@ class Defmon:
         take effect with stereo on); call ensure_stereo(True) first."""
         if not self.is_stereo_enabled():
             raise DefmonError(
-                "set_sid2_base_address: stereo is OFF; "
-                "call ensure_stereo(True) first"
+                "set_sid2_base_address: stereo is OFF; call ensure_stereo(True) first"
             )
         hi = (target >> 8) & 0xFF
         lo = target & 0xFF
@@ -514,8 +511,7 @@ class Defmon:
             )
         if lo % 0x20 != 0:
             raise DefmonError(
-                f"set_sid2_base_address: low byte must be a multiple of "
-                f"$20; got 0x{lo:02X}"
+                f"set_sid2_base_address: low byte must be a multiple of $20; got 0x{lo:02X}"
             )
         # Cycle the high byte. The chord rotates through SID2_HIGH_BYTES
         # in order — at most 3 taps to reach any slot from any other.
@@ -538,9 +534,7 @@ class Defmon:
             what=f"low byte 0x{lo:02X}",
         )
 
-    def _cycle_until(
-        self, addr: int, want: int, tap_fn, max_taps: int, what: str
-    ) -> None:
+    def _cycle_until(self, addr: int, want: int, tap_fn, max_taps: int, what: str) -> None:
         """Tap ``tap_fn`` repeatedly until the byte at ``addr`` equals
         ``want``. Quiesces (CTRL+RETURN + F7) BEFORE each tap and retries
         if a tap fails to advance the byte off its prior value —
@@ -569,9 +563,7 @@ class Defmon:
                     f"0x{addr:04X} off 0x{cur:02X} after "
                     f"{attempts_per_step} retries (target {what})"
                 )
-        raise DefmonError(
-            f"set_sid2_base_address: could not reach {what} after {max_taps} taps"
-        )
+        raise DefmonError(f"set_sid2_base_address: could not reach {what} after {max_taps} taps")
 
     # ============================================================ disk IO
 
@@ -898,9 +890,7 @@ class Defmon:
             return True
         return False
 
-    def _wait_for_disk_menu_exit(
-        self, before: ScreenSnapshot, timeout: float
-    ) -> ScreenSnapshot:
+    def _wait_for_disk_menu_exit(self, before: ScreenSnapshot, timeout: float) -> ScreenSnapshot:
         """Poll until the screen no longer looks like the disk menu.
 
         defMON's seqED screen has the literal text 'VOC0', 'VOC1', or
@@ -1124,9 +1114,7 @@ class Defmon:
             raise DefmonError(f"byte out of range: {byte_value}")
         return f"{byte_value >> 4:X}", f"{byte_value & 0xF:X}"
 
-    def type_sound_program(
-        self, byte_value: int, per_digit_settle: float = 0.05
-    ) -> None:
+    def type_sound_program(self, byte_value: int, per_digit_settle: float = 0.05) -> None:
         """Hold LSHIFT+CBM and tap two hex digits — sets the Sound
         Program (instrument) byte at the current step."""
         for digit in self._hex_digits(byte_value):
@@ -1300,7 +1288,7 @@ class Defmon:
         """Public alias for tapping arbitrary chords (notes, etc.)."""
         return self.tap(*names, **kw)
 
-    def all_documented_actions(self) -> list[tuple[str, "Callable[[], object]"]]:
+    def all_documented_actions(self) -> list[tuple[str, "Callable[[], TapOutcome | None]"]]:
         """Index of every documented (zero-arg) command. Used by the smoke
         test to exercise every shortcut without typing the same list twice."""
         return [

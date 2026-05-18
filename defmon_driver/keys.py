@@ -11,6 +11,7 @@ defMON's disk menu without touching the KERNAL keyboard buffer.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 # Custom-key sentinels (RESTORE / CAPS / 4080) use negative row values.
 # We don't need them for defMON's documented commands but include the
@@ -140,18 +141,18 @@ _ALIASES: dict[str, str] = {
 
 
 # Public KEY namespace: KEY.A, KEY.LSHIFT, KEY.LEFTARROW, etc.
-class _KeyNamespace:
-    pass
-
-
-KEY = _KeyNamespace()
+# SimpleNamespace lets pyright treat arbitrary attribute access as Any
+# rather than raising reportAttributeAccessIssue (which a plain class
+# does, even when the attributes are populated dynamically below).
 _NAME_TO_RC: dict[str, tuple[int, int]] = {}
+_kv: dict[str, tuple[int, int]] = {}
 for _k in _CANONICAL:
     _NAME_TO_RC[_k.name] = (_k.row, _k.col)
-    setattr(KEY, _k.name, (_k.row, _k.col))
+    _kv[_k.name] = (_k.row, _k.col)
 for _alias, _target in _ALIASES.items():
     _NAME_TO_RC[_alias] = _NAME_TO_RC[_target]
-    setattr(KEY, _alias, _NAME_TO_RC[_target])
+    _kv[_alias] = _NAME_TO_RC[_target]
+KEY = SimpleNamespace(**_kv)
 
 
 def lookup(name: str) -> tuple[int, int]:

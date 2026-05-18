@@ -88,11 +88,8 @@ def cursor_load_tune(
             f"after RETURN, seqED markers (VOC*) not visible within "
             f"{load_timeout}s — load did not complete"
         )
-        log.warning(
-            "[%s] cursor_load_tune attempt %d: %s", tune.name, attempt, last_err
-        )
+        log.warning("[%s] cursor_load_tune attempt %d: %s", tune.name, attempt, last_err)
 
     raise DefmonError(
-        f"cursor_load_tune({tune.name!r}): {max_attempts} attempts "
-        f"failed; last error: {last_err}"
+        f"cursor_load_tune({tune.name!r}): {max_attempts} attempts failed; last error: {last_err}"
     )

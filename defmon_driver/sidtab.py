@@ -166,9 +166,7 @@ class SidTab:
         self._ensure_entered()
         ci = self.column_map.get(column)
         if ci is None:
-            raise SidTabError(
-                f"unknown column {column!r}; " f"known: {sorted(self.column_map)}"
-            )
+            raise SidTabError(f"unknown column {column!r}; known: {sorted(self.column_map)}")
         self._walk_nav(ci.nav_idx_to_first_digit)
         self._walk_row(row)
 

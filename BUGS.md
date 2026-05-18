@@ -138,3 +138,48 @@ than a helpful "run the calibration step first" message.
 **What's missing:** Either a `--auto-calibrate` flag on
 `smoke_sidtab`, or a clearer error message that suggests the
 calibration command.
+
+## `tune_manifest.TUNES` only covers `defmon-withtunes.d64`
+
+**Where:** `defmon_driver.tune_manifest.TUNES`.
+
+**Symptom:** Although the README documents two example disk images
+(`defmon-20201008.d64` and `defmon-withtunes.d64`), `TUNES` only has
+entries for the second one. Callers using
+`tunes_for_image("defmon-20201008.d64")` get an empty tuple back with
+no warning, so a smoke that selects by image silently runs zero
+iterations.
+
+**What's missing:** A second manifest pass for `defmon-20201008.d64`
+(or, if that image really has no tune entries, an explicit comment
+saying so plus a unit-test assertion that documents the choice).
+
+## `tune_navigation` swallows the original exception type on retry
+
+**Where:** `defmon_driver.tune_navigation.cursor_load_tune`.
+
+**Symptom:** The retry loop catches `Exception` and re-raises as
+`DefmonError`, so callers writing `except RuntimeError:` /
+`except ConnectionResetError:` etc. lose the ability to discriminate
+on the original cause. The original is preserved in the log but not
+chained.
+
+**What's missing:** Use `raise DefmonError(...) from last_err` so the
+chain is visible at the call site (and in pytest output).
+
+## `Defmon.all_documented_actions` mixes `TapOutcome`-returning and
+   `None`-returning methods
+
+**Where:** `defmon_driver.defmon.Defmon.all_documented_actions`.
+
+**Symptom:** Six `super_*` helpers (`super_steps_4` etc.) return
+`None`; the other ~35 actions return `TapOutcome`. Callers that
+iterate the list naively (e.g. `outcome.release_reason`) crash with
+`AttributeError` on the None branch. `smoke.py` had this latent bug
+until recently; the signature is now correctly typed as
+`Callable[[], TapOutcome | None]` but the surface is still asymmetric.
+
+**What's missing:** Either split the index into two functions
+(`all_single_tap_actions` vs `all_multi_step_actions`) or have the
+multi-step helpers return a synthetic `TapOutcome` describing the
+last tap they issued, so the index is uniform.

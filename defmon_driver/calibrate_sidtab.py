@@ -130,9 +130,7 @@ def find_data_row(buf: bytes, header_row: int) -> int:
 # ------------------------------------------------------- main walk
 
 
-def walk_and_map(
-    d: Defmon, header_row: int, data_row: int, max_taps: int = MAX_TAPS
-) -> dict:
+def walk_and_map(d: Defmon, header_row: int, data_row: int, max_taps: int = MAX_TAPS) -> dict:
     """Type unique digits in sequence; identify each written cell with
     two-snapshot confirmation; stop when the cursor has cycled."""
     seq = "13579BDF02468ACE"
@@ -183,9 +181,7 @@ def walk_and_map(
         else:
             row, col = written
             header_letter = (
-                chr(0)
-                if header_row < 0
-                else screencode_to_ascii(snap_b[header_row * COLS + col])
+                chr(0) if header_row < 0 else screencode_to_ascii(snap_b[header_row * COLS + col])
             )
             cells.append(
                 {
@@ -200,7 +196,7 @@ def walk_and_map(
             elif written == first_cell and tap_idx > 0:
                 revisit_at = tap_idx
                 log.info(
-                    "cursor cycled back to entry cell (%d,%d) at " "tap %d",
+                    "cursor cycled back to entry cell (%d,%d) at tap %d",
                     first_cell[0],
                     first_cell[1],
                     tap_idx,
@@ -294,9 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         default=".GLOW WORM",
         help="example-tune name in defmon_driver.tune_manifest",
     )
-    p.add_argument(
-        "--d64", required=True, help="path to defMON d64 image containing the tune"
-    )
+    p.add_argument("--d64", required=True, help="path to defMON d64 image containing the tune")
     p.add_argument("--out", default="sidtab_calibration.json")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)

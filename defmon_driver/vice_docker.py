@@ -77,9 +77,10 @@ class ViceContainer:
 
     def __post_init__(self):
         if self.name is None:
-            self.name = (
-                f"asid-vice-{os.getpid()}-{int(time.monotonic() * 1000) % 1000000}"
-            )
+            # monotonic_ns is unique per construction even when two
+            # ViceContainer() calls land in the same millisecond — which
+            # they will if the harness builds containers in a loop.
+            self.name = f"asid-vice-{os.getpid()}-{time.monotonic_ns() % 10**9}"
 
     def x64sc_args(self) -> list[str]:
         """Full command line for x64sc.
@@ -150,13 +151,9 @@ class ViceContainer:
 
         log.info("starting container: %s", " ".join(cmd))
         try:
-            cid = subprocess.run(
-                cmd, check=True, capture_output=True, text=True
-            ).stdout.strip()
+            cid = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout.strip()
         except subprocess.CalledProcessError as e:
-            raise ViceContainerError(
-                f"docker run failed: {e.stderr.strip() or e.stdout}"
-            ) from e
+            raise ViceContainerError(f"docker run failed: {e.stderr.strip() or e.stdout}") from e
         self.container_id = cid
         log.info("container id: %s", cid)
 

@@ -198,10 +198,7 @@ def cell_address(voice: int, step: int, sub_field: str) -> int:
     if sub_field not in SUB_FIELD_OFFSET:
         raise ValueError(f"sub_field must be one of {list(SUB_FIELD_OFFSET)}")
     return (
-        PATTERN_BASE
-        + step * BYTES_PER_STEP
-        + voice * BYTES_PER_VOICE
-        + SUB_FIELD_OFFSET[sub_field]
+        PATTERN_BASE + step * BYTES_PER_STEP + voice * BYTES_PER_VOICE + SUB_FIELD_OFFSET[sub_field]
     )
 
 
@@ -287,9 +284,7 @@ def read_cell(
     if arranger_row is None and voice in (0, 1, 2):
         addr = cell_address(voice, step, sub_field)
     else:
-        addr = runtime_cell_address(
-            bm, voice, step, sub_field, arranger_row=arranger_row or 0
-        )
+        addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
     return bm.mem_get(addr, addr)[0]
 
 
@@ -323,9 +318,7 @@ def write_cell_direct(
         addr = cell_address(voice, step, sub_field)
         method = "direct_mem"
     else:
-        addr = runtime_cell_address(
-            bm, voice, step, sub_field, arranger_row=arranger_row or 0
-        )
+        addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
         method = f"direct_mem:runtime(arr_row={arranger_row or 0})"
     pre = bm.mem_get(addr, addr)[0]
     bm.mem_set(addr, bytes([value & 0xFF]))
@@ -339,9 +332,7 @@ def write_cell_direct(
     )
 
 
-def write_pattern_block_direct(
-    bm: BinMon, step: int, voice: int, bytes_data: bytes
-) -> None:
+def write_pattern_block_direct(bm: BinMon, step: int, voice: int, bytes_data: bytes) -> None:
     """Bulk-write a (voice, step) cell as 4 raw bytes (flag/slot_a/slot_b/note)."""
     if len(bytes_data) != BYTES_PER_VOICE:
         raise ValueError(f"need exactly {BYTES_PER_VOICE} bytes; got {len(bytes_data)}")
@@ -349,9 +340,7 @@ def write_pattern_block_direct(
     bm.mem_set(addr, bytes_data)
 
 
-def write_arranger_cell_direct(
-    bm: BinMon, voice: int, step: int, value: int
-) -> FieldWriteResult:
+def write_arranger_cell_direct(bm: BinMon, voice: int, step: int, value: int) -> FieldWriteResult:
     """Write an arranger pattern-number byte by mem_set.
 
     SID#1 voices 0/1/2 → $1B00/$1C00/$1D00 + row.
@@ -409,8 +398,7 @@ def set_mode_chord(bm: BinMon, mode: str) -> None:
             bm.mem_set(kh.TRAMPOLINE_BASE, original)
     if current_mode(bm) != target:
         raise RuntimeError(
-            f"set_mode_chord: requested {mode}=${target:02X}, "
-            f"$7167 still ${current_mode(bm):02X}"
+            f"set_mode_chord: requested {mode}=${target:02X}, $7167 still ${current_mode(bm):02X}"
         )
 
 
@@ -632,8 +620,7 @@ def write_byte_chord(bm: BinMon, value: int, sub_field: str) -> list[kh.HandlerR
     }
     if sub_field not in chord_for:
         raise ValueError(
-            f"sub_field must be one of {list(chord_for)} for hex chord; "
-            f"got {sub_field!r}"
+            f"sub_field must be one of {list(chord_for)} for hex chord; got {sub_field!r}"
         )
     mod = chord_for[sub_field]
     hi = (value >> 4) & 0xF
@@ -703,9 +690,7 @@ def set_field(
             arranger_row=arranger_row,
         )
     if mode == "seqlist":
-        return _set_field_seqlist(
-            bm, voice, step, sub_field, value, prefer_direct=prefer_direct
-        )
+        return _set_field_seqlist(bm, voice, step, sub_field, value, prefer_direct=prefer_direct)
     if mode == "sidtab":
         raise NotImplementedError(
             "set_field(mode='sidtab', ...): use defmon_driver.sidtab.SidTab "
@@ -721,9 +706,7 @@ def set_field(
             "For chord-driven dispatch (e.g. typing a filename letter) "
             "use keyhandler.press_via_loop(mode='disk', ...)."
         )
-    raise ValueError(
-        f"unknown mode {mode!r}; expected one of " "seqed|seqlist|sidtab|disk"
-    )
+    raise ValueError(f"unknown mode {mode!r}; expected one of seqed|seqlist|sidtab|disk")
 
 
 def _set_field_seqed(
@@ -737,9 +720,7 @@ def _set_field_seqed(
     arranger_row: int | None = None,
 ) -> FieldWriteResult:
     if prefer_direct:
-        return write_cell_direct(
-            bm, voice, step, sub_field, value, arranger_row=arranger_row
-        )
+        return write_cell_direct(bm, voice, step, sub_field, value, arranger_row=arranger_row)
     # Chord path. For SID#2 voices (3-5) the arranger-proxy mechanic
     # in keyhandler.press_via_loop temporarily routes the SID#1 V0/V1/V2
     # writer through the target SID#2 pattern.
