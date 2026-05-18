@@ -283,7 +283,7 @@ def derive_column_map(header_text: str, cells_in_order: list[dict]) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     p.add_argument("--port", type=int, default=6711)
     p.add_argument(
         "--tune",

@@ -172,7 +172,7 @@ def run(d64_path: Path, port: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     p.add_argument("d64", help="path to defMON .d64 image")
     p.add_argument("--port", type=int, default=6502)
     p.add_argument("-v", "--verbose", action="store_true")

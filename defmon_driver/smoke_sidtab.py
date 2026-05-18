@@ -43,7 +43,7 @@ def cell_codes(d: Defmon, row: int, cols: list[int], data_row: int) -> list[int]
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     p.add_argument("--port", type=int, default=6711)
     p.add_argument(
         "--tune",
