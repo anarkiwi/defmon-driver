@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defmon-driver"
+version = "0.1.0"
+description = "Python automation framework for driving defMON (a Commodore 64 cross-platform music editor) inside asid-vice via the binary monitor."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "anarkiwi" },
+]
+keywords = [
+    "c64",
+    "commodore-64",
+    "defmon",
+    "vice",
+    "asid-vice",
+    "sid",
+    "music",
+    "emulator",
+    "automation",
+    "binary-monitor",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Other Audience",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Emulators",
+]
+# The driver intentionally has no runtime dependencies beyond the Python
+# standard library; the asid-vice container is a separate runtime
+# concern that the user spins up via Docker.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "pyright>=1.1.350",
+]
+
+[project.urls]
+Homepage = "https://github.com/anarkiwi/defmon-driver"
+Issues = "https://github.com/anarkiwi/defmon-driver/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["defmon_driver*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-ra", "--strict-markers"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Keep the rule set conservative — the driver's docstrings are dense
+# with hex addresses and bit-level annotations that confuse some
+# pep257/pydocstyle checks.
+select = ["E", "F", "I", "W", "B"]
+ignore = [
+    "E501",  # line length — covered by ruff format
+    "E741",  # ambiguous variable name (we use single-letter regs etc.)
+    "B008",  # function call in default argument — used in CLI parsers
+]
