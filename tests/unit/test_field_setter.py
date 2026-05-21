@@ -14,11 +14,14 @@ from defmon_driver.field_setter import (
     ARRANGER_MAX_STEP,
     BYTES_PER_STEP,
     BYTES_PER_VOICE,
+    NOTE_KEYCODES,
+    NOTE_PATTERN_BYTES,
     PATTERN_BASE,
     SUB_FIELD_OFFSET,
     arranger_cell_address,
     cell_address,
 )
+from defmon_driver.keycode_table import STATIC_KEYCODES
 
 
 def test_pattern_layout_constants() -> None:
@@ -94,3 +97,35 @@ def test_arranger_cell_address_rejects_oob_step() -> None:
 def test_arranger_base_table_keys_complete() -> None:
     # All six voices must have an arranger base entry, no extras.
     assert set(ARRANGER_BASE) == {0, 1, 2, 3, 4, 5}
+
+
+# ---- NOTE_KEYCODES / NOTE_PATTERN_BYTES invariants --------------------------
+#
+# The chord-driven note write at field_setter._set_field_seqed_note_chord
+# reverse-looks the requested note byte through NOTE_PATTERN_BYTES to get a
+# key name, then forward-looks the key name through NOTE_KEYCODES to get
+# the $0E44 keycode to inject. If the two dicts ever drift apart on key
+# names (or NOTE_KEYCODES diverges from the LUT-derived STATIC_KEYCODES)
+# the chord-driven path silently writes the wrong note.
+
+
+def test_note_keycodes_and_pattern_bytes_share_key_set() -> None:
+    assert set(NOTE_KEYCODES) == set(NOTE_PATTERN_BYTES)
+
+
+def test_note_pattern_bytes_are_sequential_lower_octave() -> None:
+    # defMON encodes Z..M as $30..$3B in pattern memory.
+    expected = {k: 0x30 + i for i, k in enumerate("ZSXDCVGBHNJM")}
+    assert NOTE_PATTERN_BYTES == expected
+
+
+def test_note_keycodes_match_lut_derived_keycodes() -> None:
+    # NOTE_KEYCODES holds $0E44 keycodes (the bytes defMON's scanner
+    # writes when each note key is pressed); they MUST match the
+    # LUT-derived STATIC_KEYCODES, otherwise injecting them via
+    # press_via_loop writes the wrong note.
+    for name, kc in NOTE_KEYCODES.items():
+        assert STATIC_KEYCODES[name] == kc, (
+            f"{name}: NOTE_KEYCODES says 0x{kc:02X} but STATIC_KEYCODES "
+            f"says 0x{STATIC_KEYCODES[name]:02X}"
+        )

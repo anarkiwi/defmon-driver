@@ -37,18 +37,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import shutil
 import sys
-import tempfile
 import time
 import traceback
 from pathlib import Path
 from typing import Optional
 
-from .binmon import BinMon
+from ._smoke_support import smoke_session
 from .defmon import Defmon, DefmonError
 from .tune_manifest import TUNES
-from .vice_docker import DiskMount, ViceContainer
+from .tune_navigation import cursor_load_tune
 
 log = logging.getLogger("calibrate_sidtab")
 
@@ -305,93 +303,79 @@ def main(argv: list[str] | None = None) -> int:
         print(f"tune not found: {args.tune}", file=sys.stderr)
         return 2
 
-    workdir = Path(tempfile.mkdtemp(prefix="calibrate-sidtab-"))
-    src_d64 = Path(args.d64)
-    work_d64 = workdir / "disk.d64"
-    shutil.copy2(src_d64, work_d64)
-    container = ViceContainer(
-        binmon_port=args.port,
-        autostart="/work/disk.d64",
-        mounts=[DiskMount(str(work_d64), "/work/disk.d64", read_only=False)],
-    )
-
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rc = 0
     try:
-        container.start()
-        from .tune_navigation import cursor_load_tune as _cursor_load_tune
+        with smoke_session(
+            Path(args.d64),
+            port=args.port,
+            prefix="calibrate-sidtab-",
+            connect_timeout=15.0,
+            connect_attempts=120,
+            wait_timeout=120.0,
+        ) as s:
+            d = s.d
+            cursor_load_tune(d, tune)
+            d.stop_playback()
+            time.sleep(0.15)
+            d.enter_sidtab()
+            time.sleep(0.2)
 
-        bm = BinMon("127.0.0.1", args.port)
-        bm.connect(timeout=15.0, attempts=120, retry_delay=0.25)
-        bm.exit()
-        d = Defmon(bm)
-        d.wait_for_defmon_loaded(timeout=120.0)
-        _cursor_load_tune(d, tune)
-        d.stop_playback()
-        time.sleep(0.15)
-        d.enter_sidtab()
-        time.sleep(0.2)
+            snap_pre = screen_bytes(d)
+            header_row = find_header_row(snap_pre)
+            if header_row is None:
+                raise RuntimeError("header row (with JP+DL) not found")
+            data_row = find_data_row(snap_pre, header_row)
+            header_text = render_row(snap_pre, header_row)
+            log.info("header_row=%d (text=%r)", header_row, header_text)
+            log.info("data_row=%d", data_row)
 
-        snap_pre = screen_bytes(d)
-        header_row = find_header_row(snap_pre)
-        if header_row is None:
-            raise RuntimeError("header row (with JP+DL) not found")
-        data_row = find_data_row(snap_pre, header_row)
-        header_text = render_row(snap_pre, header_row)
-        log.info("header_row=%d (text=%r)", header_row, header_text)
-        log.info("data_row=%d", data_row)
+            walk = walk_and_map(d, header_row, data_row)
+            column_map = derive_column_map(header_text, walk["cells_in_order"])
 
-        walk = walk_and_map(d, header_row, data_row)
-        column_map = derive_column_map(header_text, walk["cells_in_order"])
+            result = {
+                "tune": tune.name,
+                "header_row": header_row,
+                "data_row": data_row,
+                "header_text": header_text,
+                "cursor_entry_cell": walk["cursor_entry_cell"],
+                "crsrlr_to_wrap": walk["crsrlr_to_wrap"],
+                "cells_in_order": walk["cells_in_order"],
+                "column_map": column_map,
+            }
+            out_path.write_text(json.dumps(result, indent=2) + "\n")
 
-        result = {
-            "tune": tune.name,
-            "header_row": header_row,
-            "data_row": data_row,
-            "header_text": header_text,
-            "cursor_entry_cell": walk["cursor_entry_cell"],
-            "crsrlr_to_wrap": walk["crsrlr_to_wrap"],
-            "cells_in_order": walk["cells_in_order"],
-            "column_map": column_map,
-        }
-        out_path.write_text(json.dumps(result, indent=2) + "\n")
-
-        # Pretty print
-        print()
-        print(f"header_row     = {header_row}")
-        print(f"data_row       = {data_row}")
-        print(f"header_text    = {header_text!r}")
-        print(f"cursor_entry   = {walk['cursor_entry_cell']}")
-        print(f"crsrlr_to_wrap = {walk['crsrlr_to_wrap']}")
-        print()
-        print(f"== column map (n={len(column_map)})")
-        print(
-            f"  {'col':<6s} {'1st_screen_col':>14s} {'n_digits':>9s} "
-            f"{'nav_to_first':>12s} cell_cols"
-        )
-        for name in WIKI_COLUMNS:
-            rec = column_map.get(name)
-            if rec is None:
-                print(f"  {name:<6s} -- not found --")
-            else:
-                print(
-                    f"  {name:<6s} {rec['first_screen_col']:>14d} "
-                    f"{rec['n_digits']:>9d} "
-                    f"{rec['nav_idx_to_first_digit']:>12d} "
-                    f"{rec['cell_cols']}"
-                )
-        print(f"\nfull JSON -> {out_path}")
-        bm.close()
+            # Pretty print
+            print()
+            print(f"header_row     = {header_row}")
+            print(f"data_row       = {data_row}")
+            print(f"header_text    = {header_text!r}")
+            print(f"cursor_entry   = {walk['cursor_entry_cell']}")
+            print(f"crsrlr_to_wrap = {walk['crsrlr_to_wrap']}")
+            print()
+            print(f"== column map (n={len(column_map)})")
+            print(
+                f"  {'col':<6s} {'1st_screen_col':>14s} {'n_digits':>9s} "
+                f"{'nav_to_first':>12s} cell_cols"
+            )
+            for name in WIKI_COLUMNS:
+                rec = column_map.get(name)
+                if rec is None:
+                    print(f"  {name:<6s} -- not found --")
+                else:
+                    print(
+                        f"  {name:<6s} {rec['first_screen_col']:>14d} "
+                        f"{rec['n_digits']:>9d} "
+                        f"{rec['nav_idx_to_first_digit']:>12d} "
+                        f"{rec['cell_cols']}"
+                    )
+            print(f"\nfull JSON -> {out_path}")
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         print(f"FATAL: {e}", file=sys.stderr)
-        rc = 1
-    finally:
-        container.stop()
-        shutil.rmtree(workdir, ignore_errors=True)
-    return rc
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

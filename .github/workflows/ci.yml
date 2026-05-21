@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on the same branch to save Actions minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -19,14 +24,34 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run unit tests
-        run: pytest -ra tests/unit
+      - name: Run unit tests with coverage gate (>=85%)
+        # cov-fail-under=85 is wired into [tool.pytest.ini_options] in
+        # pyproject.toml; pytest exits non-zero if total coverage drops
+        # below 85%.
+        run: pytest tests/unit
+
       - name: Smoke-import package
         run: python -c "import defmon_driver; print(defmon_driver.__version__)"
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install black
+        run: pip install "black>=24.0"
+      - name: Black check
+        run: black --check defmon_driver tests
 
   lint:
     runs-on: ubuntu-latest
@@ -35,8 +60,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install ruff
-        run: pip install ruff>=0.4
+        run: pip install "ruff>=0.4"
       - name: Ruff check
         run: ruff check defmon_driver tests
 
@@ -47,8 +74,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install package + pyright
         run: |
+          python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Pyright
         run: pyright defmon_driver

@@ -22,11 +22,18 @@ Modifier flags (built by $0F32 from the matrix mirror $0E39..$0E40):
     $0E42 bit $02 = SEMICOLON (voice-mute toggle for V1)
     $0E42 bit $04 = EQUALS    (voice-mute toggle for V2)
 
-Internal keycodes (output of $0F90,Y matrix-slot → keycode LUT) are
-NOT the matrix (row,col) — they are defMON's internal representation,
-captured by the live keymatrix scan and stored at $0E44. The specific
-mapping can be discovered by experiment (issue a real key tap, then
-mem_get $0E44; see :func:`capture_internal_keycode`).
+Internal keycodes (output of the ``$0F90`` matrix-slot → keycode LUT)
+are NOT the matrix (row,col) — they are defMON's internal representation,
+captured by the live keymatrix scan and stored at ``$0E44``. The LUT is
+indexed ``slot = row*8 + (7-col)`` — within each matrix row the eight
+columns are stored col-reversed. Bytes ``$FF`` (pure-modifier keys,
+dispatched via ``$0E41``) and ``$FE`` (voice-mute keys, dispatched via
+``$0E42``) are sentinels — those keys do not write ``$0E44``.
+
+Decode the table once via :func:`defmon_driver.keycode_table.decode_lut`
+or :func:`defmon_driver.keycode_table.bootstrap_keycodes` rather than
+per-key checkpoint capture; the LUT is static defMON RAM, so a single
+``mem_get`` is deterministic and orders of magnitude faster.
 """
 
 from __future__ import annotations
@@ -35,10 +42,34 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from .binmon import BinMon
+from vice_driver.binmon import BinMon
+from vice_driver.expect import Expect, ExpectPredicate, verify
 
 if TYPE_CHECKING:
     from .defmon import Defmon
+
+
+__all__ = (
+    # Re-exported from vice_driver so existing callers
+    # (``defmon_driver.keyhandler import Expect, verify``) keep working.
+    "Expect",
+    "ExpectPredicate",
+    "verify",
+    "InjectOutcome",
+)
+
+
+@dataclass(frozen=True)
+class InjectOutcome:
+    """Result of a single direct-call injection."""
+
+    keys: tuple[str, ...]
+    keycode: int
+    mod1: int
+    mod2: int
+    verified: bool  # True if ``expect`` was satisfied (or absent)
+    final_byte: Optional[int] = None  # last byte read at ``expect.addr``
+
 
 # --- defMON RAM addresses ---
 ADDR_MODE = 0x7167  # current modal context
@@ -473,33 +504,47 @@ _VOICE_SELECTOR_VALUES = (0x00, 0x09, 0x12)
 
 
 class Sid2Chord:
-    """Context manager that holds the SID#1→SID#2 arranger-proxy swap
-    across multiple direct-call key presses, enabling multi-press
-    chords (sidCALL, speed) on SID#2 voices 3-5.
+    """Context manager that holds the writer-dispatcher cursor seed
+    (and, for SID#2 voices, the SID#1→SID#2 arranger proxy swap) across
+    multiple direct-call key presses. Enables multi-press chords
+    (sidCALL, speed) on any voice 0..5.
 
-    On entry: halts the CPU at $092C, reads the SID#2 arranger entry at
+    On entry: halts the CPU at $092C and seeds the writer-dispatcher
+    cursor variables ($71CD voice selector, $71D2 step, $71CE/$71D1
+    page, $71CA/$71CB write loop, $71CC range-fill OFF, $71C1
+    supercommand flags, $716D nibble phase = first). For voice 3-5
+    additionally reads the SID#2 arranger entry at
     ($6E00/$6F00/$7000) + arranger_row, saves the corresponding SID#1
-    arranger byte, overwrites it with the SID#2 pat_num, and seeds the
-    writer-dispatcher cursor variables ($71CD voice selector, $71D2
-    step, $71CE/$71D1 page, $71CA/$71CB write loop, $71CC range-fill
-    OFF, $71C1 supercommand flags, $716D nibble phase = first).
+    arranger byte, and overwrites it with the SID#2 pat_num so the
+    SID#1 writer at $844C derefs the SID#2 pattern.
+
+    For voice 0-2 the arranger proxy is unused (the SID#1 writer
+    already targets the requested pattern). Holding the cursor seed
+    in a halted block is still necessary because defMON's main loop
+    actively restores ``$71CD`` to its current-column value every
+    iteration — a bare ``mem_set`` from outside a halt does not stick.
 
     Each `.press(keycode, mod1=, mod2=)` call patches the keyboard-scan
     JSR at $092C to NOPs, writes ($0E44, $0E41, $0E42), sets A=keycode
     + PC=$092F, resumes, and waits for $092C to re-fire. Between presses
     the writer's cursor + $716D state evolves naturally (defMON's
-    writer auto-advances step and toggles digit phase), exactly as it
-    does for SID#1 multi-press chords.
+    writer auto-advances step and toggles digit phase).
 
-    On exit: restores the SID#1 arranger byte. Resuming the CPU is
-    deferred to the outer `bm.halted()` cleanup.
+    On exit: restores the SID#1 arranger byte (if a proxy swap was
+    installed). Resuming the CPU is deferred to the outer ``bm.halted()``
+    cleanup.
 
-    Usage:
+    Usage::
 
+        # SID#2 voice:
         with kh.Sid2Chord(bm, voice=3, step=2, arranger_row=0) as ctx:
             ctx.press(hi_kc, mod1=kh.MOD_CBM)
             ctx.press(lo_kc, mod1=kh.MOD_CBM)
-        # SID#1 arranger byte restored; CPU resumed when this returns.
+
+        # SID#1 voice (arranger proxy is a no-op):
+        with kh.Sid2Chord(bm, voice=0, step=2) as ctx:
+            ctx.press(hi_kc, mod1=kh.MOD_CBM)
+            ctx.press(lo_kc, mod1=kh.MOD_CBM)
     """
 
     def __init__(
@@ -511,12 +556,8 @@ class Sid2Chord:
         arranger_row: int = 0,
         wait_timeout: float = 5.0,
     ):
-        if voice not in (3, 4, 5):
-            raise ValueError(
-                f"Sid2Chord voice must be 3, 4, or 5 (use "
-                f"write_byte_chord directly for SID#1 V0/V1/V2); "
-                f"got {voice}"
-            )
+        if voice not in range(6):
+            raise ValueError(f"voice must be 0..5, got {voice}")
         if not 0 <= step <= 0x1F:
             raise ValueError(f"step must be 0..31, got {step}")
         if not 0 <= arranger_row <= 0x7F:
@@ -528,23 +569,32 @@ class Sid2Chord:
         self.wait_timeout = wait_timeout
         self._halt_cm = None
         self._proxy_restore: tuple[int, int] | None = None
+        is_sid2 = voice >= 3
+        proxy_voice = voice - 3 if is_sid2 else voice
+        # Voice selector value used to re-seed $71CD before each press
+        # (defMON's main loop overwrites it from the visible cursor on
+        # every iteration, so the single seed in __enter__ doesn't
+        # survive into the second digit press).
+        self._voice_sel = _VOICE_SELECTOR_VALUES[proxy_voice]
 
     def __enter__(self) -> "Sid2Chord":
         bm = self.bm
-        proxy_voice = self.voice - 3
-        sid2_arr_addr = SID2_ARR_BASES[proxy_voice] + self.arranger_row
-        sid1_arr_addr = SID1_ARR_BASES[proxy_voice] + self.arranger_row
-        voice_sel = _VOICE_SELECTOR_VALUES[proxy_voice]
+        is_sid2 = self.voice >= 3
+        proxy_voice = self.voice - 3 if is_sid2 else self.voice
+        voice_sel = self._voice_sel
 
         self._halt_cm = bm.halted()
         self._halt_cm.__enter__()
         try:
             bm.run_until_pc(LOOP_TOP, timeout=self.wait_timeout)
-            # Arranger proxy swap.
-            pat_num = bm.mem_get(sid2_arr_addr, sid2_arr_addr)[0]
-            saved_byte = bm.mem_get(sid1_arr_addr, sid1_arr_addr)[0]
-            self._proxy_restore = (sid1_arr_addr, saved_byte)
-            bm.mem_set(sid1_arr_addr, bytes([pat_num]))
+            # Arranger proxy swap — only needed for SID#2 voices.
+            if is_sid2:
+                sid2_arr_addr = SID2_ARR_BASES[proxy_voice] + self.arranger_row
+                sid1_arr_addr = SID1_ARR_BASES[proxy_voice] + self.arranger_row
+                pat_num = bm.mem_get(sid2_arr_addr, sid2_arr_addr)[0]
+                saved_byte = bm.mem_get(sid1_arr_addr, sid1_arr_addr)[0]
+                self._proxy_restore = (sid1_arr_addr, saved_byte)
+                bm.mem_set(sid1_arr_addr, bytes([pat_num]))
             # Mode + cursor seed (matches press_via_loop cursor block).
             bm.mem_set(ADDR_MODE, bytes([MODE_VAL["seqed"]]))
             bm.mem_set(0x71CD, bytes([voice_sel]))
@@ -573,6 +623,14 @@ class Sid2Chord:
         original_scan_jsr = bm.mem_get(LOOP_TOP, LOOP_TOP + 2)
         bm.mem_set(LOOP_TOP, bytes([0xEA, 0xEA, 0xEA]))
         try:
+            # Re-seed the voice selector + step before each press.
+            # defMON's main loop overwrites $71CD from the visible cursor
+            # on every editor-loop iteration; without re-seeding, the
+            # second digit press of a multi-press chord lands on the
+            # wrong voice (observed empirically: V1/V2 hi-nibble writes
+            # the right cell, lo-nibble writes V0's cell).
+            bm.mem_set(0x71CD, bytes([self._voice_sel]))
+            bm.mem_set(0x71D2, bytes([self.step]))
             bm.mem_set(ADDR_KEY, bytes([keycode & 0xFF]))
             bm.mem_set(ADDR_PREV_KEY, bytes([(keycode ^ 0xFF) & 0xFF]))
             bm.mem_set(ADDR_MOD1, bytes([mod1 & 0xFF]))
@@ -616,8 +674,8 @@ def capture_keycode_via_checkpoint(
     try:
         # Tap (release will time out — but the press will fire the
         # checkpoint as soon as the scanner runs).
-        from .binmon import TAP_MODE_FIXED
-        from .keys import lookup
+        from vice_driver.binmon import TAP_MODE_FIXED
+        from vice_driver.keys import lookup
 
         rc = lookup(key_name)
         bm.keymatrix_tap([rc], mode=TAP_MODE_FIXED, frames=8)

@@ -5,7 +5,10 @@ Built on top of :func:`defmon_driver.keyhandler.press_via_loop`. Combines:
   - cursor positioning (CRSRDOWN / CRSRUP / CRSRLR direct-presses, OR
     direct mem_set of cursor variables for speed)
   - field-specific direct-call chords:
-      seqED note          : bare note key (Z=0x30, S=0x31, X=0x32, ...)
+      seqED note          : bare note key (Z..M; the $0E44 keycode is
+                            $1A..$0D — see NOTE_KEYCODES — and the byte
+                            stored in pattern memory is $30..$3B — see
+                            NOTE_PATTERN_BYTES)
       seqED sidCALL2      : CBM+digit (kc $01..$06 → A..F, $30..$39 → 0..9)
       seqED Speed         : CTRL+CBM+digit (auto-advances by step)
       seqED sidCALL1 (V1) : CBM+SHIFT+digit (V0/V2 unstable — see BUGS.md)
@@ -55,8 +58,9 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from vice_driver.binmon import BinMon
+
 from . import keyhandler as kh
-from .binmon import BinMon
 
 log = logging.getLogger(__name__)
 
@@ -139,17 +143,41 @@ ADDR_WRITE_OFFSET = 0x71BF  # last write offset (dispatcher-set)
 # Mode-init routine. Called as `JSR $0BBA` with A = desired mode value.
 ADDR_MODE_INIT_ROUTINE = 0x0BBA
 
-# Internal keycodes (output of $0F90 LUT — verified live):
-KC_CRSRRR = 0x6F  # right
-KC_CRSRDOWN = 0x6A  # down
+# Internal keycodes (output of the $0F90 matrix-slot → keycode LUT,
+# indexed slot = row*8 + (7-col); see :mod:`defmon_driver.keycode_table`).
+KC_CRSRLR = 0x6A  # cursor right/left key (row 0 col 2). Unshifted = right.
+KC_CRSRUD = 0x6F  # cursor up/down key (row 0 col 7). Unshifted = down.
 KC_LEFTARROW = 0x1F  # toggle to sidTAB / back from sidTAB
 KC_RUNSTOP = 0x93  # toggle seqED ↔ seqLIST
 KC_SPACE = 0x20
 KC_INSTDEL = 0x84
-KC_RETURN = 0x0D  # placeholder; actual return code not yet captured
+KC_RETURN = 0x92
 
-# Note keys (Z..M for the lower octave)
-NOTE_KEYCODES = {
+# Note keys (Z..M for the lower octave) — the $0E44 keycodes that
+# defMON's scanner writes for each key, derived from the $0F90 LUT.
+# These are NOT the byte values defMON stores in pattern memory after
+# a note keypress — for that, see :data:`NOTE_PATTERN_BYTES`.
+NOTE_KEYCODES: dict[str, int] = {
+    "Z": 0x1A,
+    "S": 0x13,
+    "X": 0x18,
+    "D": 0x04,
+    "C": 0x03,
+    "V": 0x16,
+    "G": 0x07,
+    "B": 0x02,
+    "H": 0x08,
+    "N": 0x0E,
+    "J": 0x0A,
+    "M": 0x0D,
+}
+
+# Note-byte values: what defMON writes to the note slot in pattern
+# memory after a successful note keypress. Empirically derived (tap a
+# note key in seqED, observe the V0-note byte at $1F03). For the
+# lower octave Z..M these are $30..$3B — the same arithmetic-sequence
+# pattern that the (mislabelled, pre-fix) NOTE_KEYCODES dict held.
+NOTE_PATTERN_BYTES: dict[str, int] = {
     "Z": 0x30,
     "S": 0x31,
     "X": 0x32,
@@ -277,14 +305,13 @@ def arranger_cell_address(voice: int, step: int) -> int:
 def read_cell(
     bm: BinMon, voice: int, step: int, sub_field: str, arranger_row: int | None = None
 ) -> int:
-    """Read a cell byte. Voice/arranger-row resolution mirrors
-    ``write_cell_direct``: ``arranger_row=None`` + voice in 0..2 uses
-    the simple pattern-0 layout; otherwise resolves via the arranger
-    + ``$1A00/$1A80`` table at runtime."""
-    if arranger_row is None and voice in (0, 1, 2):
-        addr = cell_address(voice, step, sub_field)
-    else:
-        addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
+    """Read a cell byte. Always resolves via the runtime arranger +
+    ``$1A00/$1A80`` pattern-base table — the simple ``cell_address``
+    model only applies when V0/V1/V2 all reference pattern 0, which is
+    not guaranteed even on a freshly booted disk image (the boot state
+    of ``defmon-20201008.d64`` has V0 → pat 1 at ``$1F80``, V1/V2 →
+    pat 0 at ``$1F00``)."""
+    addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
     return bm.mem_get(addr, addr)[0]
 
 
@@ -306,20 +333,14 @@ def write_cell_direct(
 ) -> FieldWriteResult:
     """Write a single cell byte by mem_set into the pattern buffer.
 
-    ``arranger_row=None`` (default) uses the simple ``cell_address``
-    helper that assumes V0/V1/V2 share pattern 0 at ``$1F00`` and lays
-    out 12 bytes per step (V0..V2 ×4 bytes).
-
-    When ``arranger_row`` is given (or ``voice >= 3``), the cell is
-    resolved at runtime via the arranger → ``$1A00/$1A80`` →
-    pattern-base path. Required for SID#2 voices (3-5) and for tunes
-    whose arranger row references distinct patterns per voice."""
-    if arranger_row is None and voice in (0, 1, 2):
-        addr = cell_address(voice, step, sub_field)
-        method = "direct_mem"
-    else:
-        addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
-        method = f"direct_mem:runtime(arr_row={arranger_row or 0})"
+    Always resolves the cell at runtime via the arranger →
+    ``$1A00/$1A80`` → pattern-base path. The legacy ``cell_address``
+    helper assumed V0/V1/V2 all reference pattern 0 at ``$1F00`` with
+    12-byte steps, which is empirically false on a freshly booted
+    ``defmon-20201008.d64`` (V0 → pat 1 at ``$1F80``, V1/V2 → pat 0 at
+    ``$1F00``)."""
+    addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arranger_row or 0)
+    method = f"direct_mem:runtime(arr_row={arranger_row or 0})"
     pre = bm.mem_get(addr, addr)[0]
     bm.mem_set(addr, bytes([value & 0xFF]))
     post = bm.mem_get(addr, addr)[0]
@@ -513,10 +534,9 @@ def cursor_step_keypress(bm: BinMon, n: int = 1) -> None:
     """Direct-press CRSRDOWN n times (or CRSRUP if n<0). Cosmetic walk —
     does NOT reliably update the writer-dispatcher's $71CB/$71D2; use
     position_cursor() for write-target placement."""
-    kc = KC_CRSRDOWN
     mod = kh.MOD_NONE if n > 0 else kh.MOD_SHIFT
     for _ in range(abs(n)):
-        kh.press_via_loop(bm, "seqed", keycode=kc, mod1=mod, wait_timeout=2.0)
+        kh.press_via_loop(bm, "seqed", keycode=KC_CRSRUD, mod1=mod, wait_timeout=2.0)
 
 
 def cursor_right_keypress(bm: BinMon, n: int = 1) -> None:
@@ -524,7 +544,7 @@ def cursor_right_keypress(bm: BinMon, n: int = 1) -> None:
     cursor_step_keypress."""
     mod = kh.MOD_NONE if n > 0 else kh.MOD_SHIFT
     for _ in range(abs(n)):
-        kh.press_via_loop(bm, "seqed", keycode=KC_CRSRRR, mod1=mod, wait_timeout=2.0)
+        kh.press_via_loop(bm, "seqed", keycode=KC_CRSRLR, mod1=mod, wait_timeout=2.0)
 
 
 # Short-form aliases.
@@ -731,19 +751,18 @@ def _set_field_seqed(
 
     if sub_field == "note":
         # Single press — the simple case. Use cursor=(voice, step) so
-        # the proxy swap fires for V3-V5.
-        rev = {v: k for k, v in NOTE_KEYCODES.items()}
+        # the proxy swap fires for V3-V5. The caller passes the desired
+        # pattern-memory note byte (e.g. $30 for Z); we reverse-look
+        # the key name out of NOTE_PATTERN_BYTES and dispatch with the
+        # corresponding $0E44 keycode from NOTE_KEYCODES.
+        rev = {v: k for k, v in NOTE_PATTERN_BYTES.items()}
         if value not in rev:
             raise NotImplementedError(
                 f"chord-driven note write only handles values in "
-                f"{sorted(NOTE_KEYCODES.values())}; got {value:#x}"
+                f"{sorted(NOTE_PATTERN_BYTES.values())}; got {value:#x}"
             )
         kc = NOTE_KEYCODES[rev[value]]
-        addr = (
-            cell_address(voice, step, sub_field)
-            if voice < 3 and arranger_row is None
-            else runtime_cell_address(bm, voice, step, sub_field, arranger_row=arr_row)
-        )
+        addr = runtime_cell_address(bm, voice, step, sub_field, arranger_row=arr_row)
         pre = bm.mem_get(addr, addr)[0]
         kh.press_via_loop(
             bm,
@@ -764,13 +783,13 @@ def _set_field_seqed(
             detail={"addr": addr},
         )
 
-    # Multi-press chords (sidCALL high+low, speed 2 nibbles). The
-    # writer auto-advances $716D / step on each press, so re-positioning
-    # the cursor between presses would clobber the first nibble.
-    #   - SID#1 V0/V1/V2: caller is responsible for placing the cursor;
-    #     write_byte_chord just emits two presses with no cursor reset.
-    #   - SID#2 V3/V4/V5: needs persistent arranger proxy AND a single
-    #     cursor seed shared by both presses — Sid2Chord holds both.
+    # Multi-press chords (sidCALL high+low, speed 2 nibbles). Both the
+    # cursor seed AND the two digit presses must land inside one halted
+    # block — defMON's main loop actively restores $71CD every iteration,
+    # so a bare mem_set from outside the halt is reverted before the
+    # writer dispatch can read it. ``Sid2Chord`` holds the halt across
+    # all presses and (for SID#2 voices) also installs the arranger
+    # proxy swap; for V0-V2 the proxy is a no-op.
     chord_mod_for = {
         "sidcall1": kh.MOD_CBM,
         "sidcall2": kh.MOD_CBM,
@@ -783,17 +802,6 @@ def _set_field_seqed(
             f"{list(chord_mod_for) + ['note']}; got {sub_field!r}"
         )
 
-    if voice in (0, 1, 2):
-        write_byte_chord(bm, value, sub_field)
-        actual = read_cell(bm, voice, step, sub_field, arranger_row=arranger_row)
-        return FieldWriteResult(
-            ok=(actual == (value & 0xFF)),
-            pre_value=0,
-            post_value=actual,
-            method=f"chord:{sub_field}={value:#x}",
-        )
-
-    # SID#2 multi-press path.
     mod = chord_mod_for[sub_field]
     hi = (value >> 4) & 0xF
     lo = value & 0xF
@@ -805,11 +813,12 @@ def _set_field_seqed(
         ctx.press(hi_kc, mod1=mod)
         ctx.press(lo_kc, mod1=mod)
     actual = bm.mem_get(addr, addr)[0]
+    method_tag = "chord" if voice < 3 else "chord:sid2"
     return FieldWriteResult(
         ok=(actual == (value & 0xFF)),
         pre_value=pre,
         post_value=actual,
-        method=f"chord:sid2:{sub_field}={value:#x}",
+        method=f"{method_tag}:{sub_field}={value:#x}",
         detail={"addr": addr},
     )
 

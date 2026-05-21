@@ -24,14 +24,23 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .binmon import (
+from vice_driver.binmon import (
     RELEASE_OBSERVED,
     TAP_MODE_FIXED,
     BinMon,
     BinmonError,
 )
-from .keys import chord_to_keys, lookup, text_to_chords
-from .screen import ScreenSnapshot, parse_screen_response
+from vice_driver.keys import chord_to_keys, lookup, text_to_chords
+from vice_driver.screen import ScreenSnapshot, parse_screen_response
+
+from .keycode_table import resolve_chord
+from .keyhandler import (
+    MODE_HANDLER,
+    Expect,
+    InjectOutcome,
+    press_via_loop,
+    verify,
+)
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +96,9 @@ class Defmon:
         require_observed: bool = False,
         wait_release: bool = True,
         wait_timeout: float = 1.5,
+        expect: Expect | None = None,
+        max_retries: int = 1,
+        pre_quiesce: bool = False,
     ) -> TapOutcome:
         """Tap a chord, optionally polling until defMON observes/times out.
 
@@ -101,8 +113,61 @@ class Defmon:
                  stats — without it the get races the tap submission.
         wait_timeout - cap on the polling loop. Even at the 60-frame
                  default, in warp mode this never approaches the cap.
+        expect - if set, after each tap poll the predicate at
+                 ``expect.addr`` until it matches or ``expect.timeout``
+                 elapses. On mismatch, the tap is retried (up to
+                 ``max_retries`` total attempts) before raising
+                 :class:`DefmonError` with the final observed byte.
+        max_retries - total tap attempts when ``expect`` is given.
+                 Default 1 = one tap (no retry). Ignored when
+                 ``expect is None``.
+        pre_quiesce - if True, run a (CTRL+RETURN, F7) quiesce before
+                 each attempt. Use for back-to-back multi-modifier
+                 chords where the previous modifier latches can confuse
+                 defMON's dispatch.
         """
+        if max_retries < 1:
+            raise ValueError(f"max_retries must be >= 1, got {max_retries}")
         rc = chord_to_keys(*names)
+        last_outcome: TapOutcome | None = None
+        last_byte: int | None = None
+        for _attempt in range(max_retries):
+            if pre_quiesce:
+                self._stereo_quiesce()
+            last_outcome = self._tap_once(
+                names=names,
+                rc=rc,
+                frames=frames,
+                mode=mode,
+                settle=settle,
+                require_observed=require_observed,
+                wait_release=wait_release,
+                wait_timeout=wait_timeout,
+            )
+            if expect is None:
+                return last_outcome
+            ok, last_byte = verify(self.bm, expect)
+            if ok:
+                return last_outcome
+        assert expect is not None and last_byte is not None
+        raise DefmonError(
+            f"tap({list(names)!r}): byte at 0x{expect.addr:04X} did not reach "
+            f"the expected value after {max_retries} attempt"
+            f"{'s' if max_retries != 1 else ''} (final 0x{last_byte:02X})"
+        )
+
+    def _tap_once(
+        self,
+        *,
+        names: tuple[str, ...],
+        rc: list[tuple[int, int]],
+        frames: int,
+        mode: int,
+        settle: float,
+        require_observed: bool,
+        wait_release: bool,
+        wait_timeout: float,
+    ) -> TapOutcome:
         self.bm.keymatrix_tap(rc, mode=mode, frames=frames)
 
         out = self.bm.keymatrix_get()
@@ -235,6 +300,76 @@ class Defmon:
         """Type printable ASCII via the keyboard matrix (defMON disk-menu prompt)."""
         for chord in text_to_chords(text):
             self.tap(*chord, settle=per_char_settle)
+
+    def inject(
+        self,
+        *names: str,
+        mode: str | None = None,
+        set_mode: bool = False,
+        expect: Expect | None = None,
+        wait_timeout: float = 5.0,
+    ) -> InjectOutcome:
+        """Direct-call dispatch of a single chord, bypassing keymatrix_tap.
+
+        Sets defMON's debounced-key register ($0E44) and modifier flags
+        ($0E41 / $0E42) inside a halted block via
+        :func:`keyhandler.press_via_loop`, then resumes for exactly one
+        editor-loop iteration. No debounce window, no modifier-latch
+        carry-over from a prior chord, no player-IRQ race.
+
+        ``names`` follows the same case-insensitive convention as
+        :meth:`tap`. CTRL/LSHIFT/RSHIFT/CBM are auto-promoted to
+        modifier-flag bits; exactly one non-modifier key per chord.
+
+        ``mode`` selects the modal context defMON dispatches in;
+        defaults to whatever ``$7167`` currently reads. ``set_mode=True``
+        forces ``$7167 = MODE_VAL[mode]`` before dispatching — useful
+        when the caller knows the modal switch needs to happen
+        atomically with the press.
+
+        ``expect`` polls a state byte after dispatch; if the predicate
+        is not satisfied within its timeout, raises :class:`DefmonError`
+        with the final observed value. ``expect=None`` skips
+        verification and returns immediately.
+        """
+        resolved = resolve_chord(names)
+        if resolved.keycode is None:
+            raise DefmonError(
+                f"inject({names!r}): pure-modifier chord has no key to dispatch; "
+                f"include exactly one non-modifier key"
+            )
+        mode = mode or self.current_mode_name()
+        if mode not in MODE_HANDLER:
+            raise DefmonError(
+                f"inject({names!r}): current mode is {mode!r}; "
+                f"pass mode= explicitly (one of {sorted(MODE_HANDLER)})"
+            )
+        press_via_loop(
+            self.bm,
+            mode,
+            keycode=resolved.keycode,
+            mod1=resolved.mod1,
+            mod2=resolved.mod2,
+            set_mode=set_mode,
+            wait_timeout=wait_timeout,
+        )
+        final_byte: int | None = None
+        if expect is not None:
+            ok, final_byte = verify(self.bm, expect)
+            if not ok:
+                raise DefmonError(
+                    f"inject({names!r}): byte at 0x{expect.addr:04X} did not "
+                    f"reach the expected value within {expect.timeout}s "
+                    f"(final 0x{final_byte:02X})"
+                )
+        return InjectOutcome(
+            keys=tuple(names),
+            keycode=resolved.keycode,
+            mod1=resolved.mod1,
+            mod2=resolved.mod2,
+            verified=True,
+            final_byte=final_byte,
+        )
 
     # ---------------------------------------------------------- screen IO
 
@@ -440,33 +575,7 @@ class Defmon:
             pass
         time.sleep(0.1)
 
-    def _poll_byte_until(self, addr: int, want: int, timeout: float) -> bool:
-        """Poll a single byte address until it equals ``want`` or ``timeout``
-        elapses. Returns True if seen."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.bm.mem_get(addr, addr)[0] == want:
-                return True
-            time.sleep(0.1)
-        return False
-
     STEREO_CHORD_RETRIES = 3
-
-    def _retry_chord_until(self, addr: int, want: int, tap_fn, chord_name: str) -> None:
-        """Quiesce → tap → poll. Retry up to STEREO_CHORD_RETRIES times if
-        the byte at ``addr`` doesn't reach ``want`` — defMON's chord
-        handler intermittently misses a tap when consecutive multi-mod
-        chords arrive too close together, even with quiesce."""
-        for _attempt in range(1, self.STEREO_CHORD_RETRIES + 1):
-            self._stereo_quiesce()
-            tap_fn()
-            if self._poll_byte_until(addr, want, self.STEREO_VERIFY_TIMEOUT):
-                return
-        cur = self.bm.mem_get(addr, addr)[0]
-        raise DefmonError(
-            f"{chord_name}: byte at 0x{addr:04X} did not reach 0x{want:02X} "
-            f"after {self.STEREO_CHORD_RETRIES} attempts; still 0x{cur:02X}"
-        )
 
     def ensure_stereo(self, enabled: bool = True) -> None:
         """Idempotent toggle_stereo: if the state already matches `enabled`,
@@ -475,8 +584,18 @@ class Defmon:
         if self.is_stereo_enabled() == enabled:
             return
         want = 1 if enabled else 0
-        self._retry_chord_until(
-            self.ADDR_STEREO_FLAG, want, self.toggle_stereo, f"ensure_stereo({enabled})"
+        self.tap(
+            "CTRL",
+            "LSHIFT",
+            "LEFTARROW",
+            expect=Expect(
+                addr=self.ADDR_STEREO_FLAG,
+                want=want,
+                timeout=self.STEREO_VERIFY_TIMEOUT,
+                poll_interval=0.1,
+            ),
+            max_retries=self.STEREO_CHORD_RETRIES,
+            pre_quiesce=True,
         )
 
     def select_sid_chip(self, chip: int) -> None:
@@ -486,11 +605,17 @@ class Defmon:
         if self.current_sid_chip() == chip:
             return
         want = 1 if chip == 2 else 0
-        self._retry_chord_until(
-            self.ADDR_CHIP_SELECT,
-            want,
-            self.switch_sid_chip,
-            f"select_sid_chip({chip})",
+        self.tap(
+            "CTRL",
+            "LEFTARROW",
+            expect=Expect(
+                addr=self.ADDR_CHIP_SELECT,
+                want=want,
+                timeout=self.STEREO_VERIFY_TIMEOUT,
+                poll_interval=0.1,
+            ),
+            max_retries=self.STEREO_CHORD_RETRIES,
+            pre_quiesce=True,
         )
 
     def set_sid2_base_address(self, target: int) -> None:
@@ -520,7 +645,7 @@ class Defmon:
         self._cycle_until(
             self.ADDR_SID2_HIGH,
             hi,
-            self.cycle_sid_high_byte,
+            chord=("CTRL", "LSHIFT", "UPARROW"),  # cycle_sid_high_byte
             max_taps=len(self.SID2_HIGH_BYTES),
             what=f"high byte 0x{hi:02X}",
         )
@@ -529,40 +654,46 @@ class Defmon:
         self._cycle_until(
             self.ADDR_SID2_LOW,
             lo,
-            self.adjust_sid_low_byte,
+            chord=("CTRL", "CBM", "UPARROW"),  # adjust_sid_low_byte
             max_taps=8,
             what=f"low byte 0x{lo:02X}",
         )
 
-    def _cycle_until(self, addr: int, want: int, tap_fn, max_taps: int, what: str) -> None:
-        """Tap ``tap_fn`` repeatedly until the byte at ``addr`` equals
-        ``want``. Quiesces (CTRL+RETURN + F7) BEFORE each tap and retries
-        if a tap fails to advance the byte off its prior value —
-        defMON's chord handler intermittently drops consecutive
-        multi-mod chord taps."""
-        attempts_per_step = self.STEREO_CHORD_RETRIES
+    def _cycle_until(
+        self,
+        addr: int,
+        want: int,
+        chord: tuple[str, ...],
+        max_taps: int,
+        what: str,
+    ) -> None:
+        """Tap ``chord`` repeatedly until the byte at ``addr`` equals
+        ``want``. Each advance-tap goes through ``tap(..., pre_quiesce=True,
+        max_retries=STEREO_CHORD_RETRIES)`` with an "advanced off prior"
+        predicate, so an individual tap that fails to advance is retried
+        before the cycle gives up."""
         for _ in range(max_taps):
             cur = self.bm.mem_get(addr, addr)[0]
             if cur == want:
                 return
-            advanced = False
-            for _attempt in range(attempts_per_step):
-                self._stereo_quiesce()
-                tap_fn()
-                deadline = time.monotonic() + self.STEREO_VERIFY_TIMEOUT
-                while time.monotonic() < deadline:
-                    if self.bm.mem_get(addr, addr)[0] != cur:
-                        advanced = True
-                        break
-                    time.sleep(0.1)
-                if advanced:
-                    break
-            if not advanced:
+            try:
+                self.tap(
+                    *chord,
+                    expect=Expect(
+                        addr=addr,
+                        want=lambda v, _prior=cur: v != _prior,
+                        timeout=self.STEREO_VERIFY_TIMEOUT,
+                        poll_interval=0.1,
+                    ),
+                    max_retries=self.STEREO_CHORD_RETRIES,
+                    pre_quiesce=True,
+                )
+            except DefmonError as e:
                 raise DefmonError(
                     f"set_sid2_base_address: tap failed to advance "
                     f"0x{addr:04X} off 0x{cur:02X} after "
-                    f"{attempts_per_step} retries (target {what})"
-                )
+                    f"{self.STEREO_CHORD_RETRIES} retries (target {what})"
+                ) from e
         raise DefmonError(f"set_sid2_base_address: could not reach {what} after {max_taps} taps")
 
     # ============================================================ disk IO
@@ -1069,25 +1200,22 @@ class Defmon:
     # right/down, LSHIFT+key = left/up. Used everywhere the cursor moves
     # in seqED, seqLIST, sidTAB, and the disk-menu directory listing.
 
-    def cursor_right(self, count: int = 1, settle: float = 0.04) -> None:
+    def _cursor_walk(self, chord: tuple[str, ...], count: int, settle: float) -> None:
         for _ in range(count):
-            self.tap("CRSRLR")
+            self.tap(*chord)
             time.sleep(settle)
+
+    def cursor_right(self, count: int = 1, settle: float = 0.04) -> None:
+        self._cursor_walk(("CRSRLR",), count, settle)
 
     def cursor_left(self, count: int = 1, settle: float = 0.04) -> None:
-        for _ in range(count):
-            self.tap("LSHIFT", "CRSRLR")
-            time.sleep(settle)
+        self._cursor_walk(("LSHIFT", "CRSRLR"), count, settle)
 
     def cursor_down(self, count: int = 1, settle: float = 0.04) -> None:
-        for _ in range(count):
-            self.tap("CRSRUD")
-            time.sleep(settle)
+        self._cursor_walk(("CRSRUD",), count, settle)
 
     def cursor_up(self, count: int = 1, settle: float = 0.04) -> None:
-        for _ in range(count):
-            self.tap("LSHIFT", "CRSRUD")
-            time.sleep(settle)
+        self._cursor_walk(("LSHIFT", "CRSRUD"), count, settle)
 
     # --- step-level value editing in seqED ------------------------------
     # Per the wiki interface_overview, a seqED step has three editable
@@ -1114,27 +1242,31 @@ class Defmon:
             raise DefmonError(f"byte out of range: {byte_value}")
         return f"{byte_value >> 4:X}", f"{byte_value & 0xF:X}"
 
+    def _type_hex_byte(
+        self,
+        byte_value: int,
+        modifiers: tuple[str, ...],
+        per_digit_settle: float,
+    ) -> None:
+        for digit in self._hex_digits(byte_value):
+            self.tap(*modifiers, digit)
+            time.sleep(per_digit_settle)
+
     def type_sound_program(self, byte_value: int, per_digit_settle: float = 0.05) -> None:
         """Hold LSHIFT+CBM and tap two hex digits — sets the Sound
         Program (instrument) byte at the current step."""
-        for digit in self._hex_digits(byte_value):
-            self.tap("LSHIFT", "CBM", digit)
-            time.sleep(per_digit_settle)
+        self._type_hex_byte(byte_value, ("LSHIFT", "CBM"), per_digit_settle)
 
     def type_speed(self, byte_value: int, per_digit_settle: float = 0.05) -> None:
         """Hold CTRL+CBM and tap two hex digits — sets the Speed byte
         at the current step."""
-        for digit in self._hex_digits(byte_value):
-            self.tap("CTRL", "CBM", digit)
-            time.sleep(per_digit_settle)
+        self._type_hex_byte(byte_value, ("CTRL", "CBM"), per_digit_settle)
 
     def type_hex_byte(self, byte_value: int, per_digit_settle: float = 0.05) -> None:
         """Tap two hex digits with no modifier. Used in sidTAB cells
         (waveform/ADSR/etc) and seqLIST voice cells (pattern numbers)
         — both modes accept hex digits directly at the cursor."""
-        for digit in self._hex_digits(byte_value):
-            self.tap(digit)
-            time.sleep(per_digit_settle)
+        self._type_hex_byte(byte_value, (), per_digit_settle)
 
     def multi_insert(self, digit: str) -> TapOutcome:
         """CTRL + digit — insert value across the current super-zone."""

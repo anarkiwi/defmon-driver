@@ -20,22 +20,42 @@ behaviour but do not prevent the lost tap. A diagnostic that captures
 defMON's debounce / modifier-flag bytes at the moment a chord is
 silently dropped would be valuable.
 
-## seqED V0 / V2 sidCALL1 (`CBM+SHIFT+digit`) is unstable
+## ~~seqED V0 / V2 sidCALL1 is unstable~~ (FIXED)
 
 **Where:** `defmon_driver.field_setter.set_field(sub_field="sidcall1")`.
 
-**Symptom:** The CBM+SHIFT+digit chord lands the digit reliably on
-voice 1 but is flaky on voices 0 and 2. The docstring at the top of
-`field_setter.py` notes this; the chord-driven path silently mis-writes
-on those voices.
+**Root cause:** Two compounding bugs.
 
-**What's missing:** A direct-RAM fallback specifically for `sidcall1`
-across V0 / V2, or a writer-routine inspection that explains the
-asymmetry. The arranger writer at `$B396` is the first place to look.
+1. `position_cursor`'s ``mem_set`` of ``$71CD`` (voice selector) did
+   not stick because defMON's main loop actively restores ``$71CD``
+   from the visible-cursor state every editor-loop iteration. The set
+   needs to happen inside a halted block, and the cursor must be
+   re-seeded between successive digit presses or the second press
+   lands on a different voice than the first.
+2. `read_cell` / `write_cell_direct` / chord-driven `set_field` fell
+   back to the legacy ``cell_address`` helper for V0/V1/V2 when
+   ``arranger_row=None``. That helper assumes V0/V1/V2 all reference
+   pattern 0 at ``$1F00`` with a 12-byte step stride, which is
+   empirically false even on a freshly booted ``defmon-20201008.d64``
+   (V0 → pat 1 at ``$1F80``, V1/V2 → pat 0 at ``$1F00``). The
+   reported address didn't match where defMON actually wrote, so
+   verification always failed even when the write had succeeded.
+
+**Fix:** ``keyhandler.Sid2Chord`` accepts voices 0..5 and re-seeds
+``$71CD`` / ``$71D2`` before every press inside the halted block.
+``set_field``, ``write_cell_direct`` and ``read_cell`` now resolve all
+cells via ``runtime_cell_address`` unconditionally. The chord and
+mismatch hypothesis in the original BUGS.md entry (CBM+SHIFT+digit,
+V1 reliable, asymmetry in $B396) was incorrect — the actual chord is
+CBM+digit and the writer is voice-symmetric.
+
+**Smoke:** ``python -m defmon_driver.smoke_sidcall`` exercises
+sidcall1 across V0/V1/V2 × step 0/3/7 × value 0x00/0x57/0xAB/0xFF and
+PASSes 36/36.
 
 ## Byte-granularity coverage installs slowly
 
-**Where:** `defmon_driver.coverage.Coverage(granularity="byte")`.
+**Where:** `vice_driver.coverage.Coverage(granularity="byte")`.
 
 **Symptom:** Installing 45,000+ per-byte CHECK_EXEC checkpoints across
 the player / dispatcher / sidTAB / disk-menu / encoder bands takes ~11
@@ -53,7 +73,7 @@ should pass it.
 
 ## `silent=True` checkpoints still throttle warp emulation
 
-**Where:** `defmon_driver.binmon.BinMon.checkpoint_set(silent=True)`.
+**Where:** `vice_driver.binmon.BinMon.checkpoint_set(silent=True)`.
 
 **Symptom:** Even with the `silent` flag set, installing many thousands
 of watchpoints adds noticeable per-instruction overhead to warp
@@ -99,7 +119,7 @@ based on the container's `warp` flag.
 
 ## `text_to_chords` covers only the basic ASCII subset
 
-**Where:** `defmon_driver.keys.text_to_chords`.
+**Where:** `vice_driver.keys.text_to_chords`.
 
 **Symptom:** Characters with no single-key (optionally with shift) matrix
 path — e.g. backtick, vertical bar, curly braces — raise `KeyError`.
@@ -112,7 +132,7 @@ characters.
 
 ## Coverage page attribution misses sub-page granularity
 
-**Where:** `defmon_driver.coverage.Coverage(granularity="page")`.
+**Where:** `vice_driver.coverage.Coverage(granularity="page")`.
 
 **Symptom:** Page-granular coverage gives one hit per 256-byte page,
 which is enough to identify hot bands but not enough to pin down which

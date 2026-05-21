@@ -25,25 +25,17 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
 import sys
-import tempfile
 import time
 import traceback
 from pathlib import Path
 
-from .binmon import CHECK_EXEC, MEMSPACE_MAIN, BinMon
+from vice_driver.binmon import CHECK_EXEC, MEMSPACE_MAIN, BinMon
+
+from ._smoke_support import section, smoke_session
 from .defmon import Defmon
-from .vice_docker import DiskMount, ViceContainer
 
 log = logging.getLogger("test-cp-cpuhistory")
-
-
-def section(title: str) -> None:
-    print()
-    print("-" * 72)
-    print("  " + title)
-    print("-" * 72)
 
 
 def test_checkpoint_lifecycle(bm: BinMon, d: Defmon) -> list[str]:
@@ -82,7 +74,7 @@ def test_checkpoint_lifecycle(bm: BinMon, d: Defmon) -> list[str]:
     print(f"  after F1: hit_count={after.hit_count}")
     if after.hit_count == 0:
         failures.append(
-            "checkpoint never fired after F1 — player range wrong, or checkpoint plumbing broken"
+            "checkpoint never fired after F1 — player range wrong, or " "checkpoint plumbing broken"
         )
 
     # Stop playback so we don't keep filling cpuhistory with player loop.
@@ -155,46 +147,30 @@ def test_cpuhistory(bm: BinMon) -> list[str]:
 
 
 def run(d64_path: Path, port: int) -> int:
-    workdir = Path(tempfile.mkdtemp(prefix="defmon-cpcheck-"))
-    work_d64 = workdir / "disk.d64"
-    shutil.copy2(d64_path, work_d64)
-
-    container = ViceContainer(
-        binmon_port=port,
-        autostart="/work/disk.d64",
-        mounts=[DiskMount(str(work_d64), "/work/disk.d64", read_only=False)],
-    )
-
     failures: list[str] = []
     try:
-        container.start()
-        section(f"CONTAINER {container.container_id} on :{port}")
+        with smoke_session(
+            d64_path,
+            port=port,
+            prefix="defmon-cpcheck-",
+            cleanup_workdir=False,
+        ) as s:
+            section(f"CONTAINER {s.container.container_id} on :{port}")
+            section("BOOTING defMON")
+            # Don't dump the whole boot screen here — keep output focused on
+            # what we're actually testing. One header line is enough to prove
+            # we got past wait_for_defmon_loaded.
+            head = s.boot_snapshot.lines()[0].strip() if s.boot_snapshot.lines() else ""
+            print(f"  boot header: {head!r}")
 
-        bm = BinMon("127.0.0.1", port)
-        bm.connect(timeout=10.0, attempts=80, retry_delay=0.25)
-        bm.exit()
+            section("CHECKPOINT lifecycle")
+            failures += test_checkpoint_lifecycle(s.bm, s.d)
 
-        d = Defmon(bm)
-        section("BOOTING defMON")
-        snap = d.wait_for_defmon_loaded(timeout=90.0)
-        # Don't dump the whole boot screen here — keep output focused on
-        # what we're actually testing. One header line is enough to prove
-        # we got past wait_for_defmon_loaded.
-        head = snap.lines()[0].strip() if snap.lines() else ""
-        print(f"  boot header: {head!r}")
-
-        section("CHECKPOINT lifecycle")
-        failures += test_checkpoint_lifecycle(bm, d)
-
-        section("CPUHISTORY decode")
-        failures += test_cpuhistory(bm)
-
-        bm.close()
+            section("CPUHISTORY decode")
+            failures += test_cpuhistory(s.bm)
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         failures.append(f"top-level: {e}")
-    finally:
-        container.stop()
 
     section("RESULT")
     if failures:
