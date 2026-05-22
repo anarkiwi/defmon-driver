@@ -1,0 +1,130 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defmon-driver"
+dynamic = ["version"]
+description = "Python automation framework for driving defMON (a Commodore 64 cross-platform music editor) inside asid-vice via the binary monitor."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "anarkiwi" },
+]
+keywords = [
+    "c64",
+    "commodore-64",
+    "defmon",
+    "vice",
+    "asid-vice",
+    "sid",
+    "music",
+    "emulator",
+    "automation",
+    "binary-monitor",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Other Audience",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Emulators",
+]
+# The defMON-specific layer depends on vice-driver for the wire protocol,
+# key matrix, screen scrape, container management, and coverage harness.
+# The asid-vice container is a separate runtime concern that the user
+# spins up via Docker.
+dependencies = [
+    "vice-driver>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "pyright>=1.1.350",
+    "black>=24.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/anarkiwi/defmon-driver"
+Issues = "https://github.com/anarkiwi/defmon-driver/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "defmon_driver._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["defmon_driver*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--cov=defmon_driver",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["defmon_driver"]
+# Exclude entry points that require a running asid-vice container —
+# they're exercised by the live smoke/calibration CLIs against Docker,
+# not by the offline unit suite. See README "CLI smoke tests".
+omit = [
+    "defmon_driver/_smoke_support.py",
+    "defmon_driver/bootstrap_keycodes.py",
+    "defmon_driver/calibrate_sidtab.py",
+    "defmon_driver/smoke.py",
+    "defmon_driver/smoke_checkpoint_cpuhistory.py",
+    "defmon_driver/smoke_coverage.py",
+    "defmon_driver/smoke_note_chord.py",
+    "defmon_driver/smoke_sidcall.py",
+    "defmon_driver/smoke_sidtab.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    # Standard "this only runs in production" patterns.
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "pass",
+    "\\.\\.\\.",
+]
+show_missing = true
+skip_covered = false
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+# Keep black aligned with ruff's line-length; both tools format the
+# same code so a divergence on width would create a fight loop.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Keep the rule set conservative — the driver's docstrings are dense
+# with hex addresses and bit-level annotations that confuse some
+# pep257/pydocstyle checks.
+select = ["E", "F", "I", "W", "B"]
+ignore = [
+    "E501",  # line length — covered by ruff format
+    "E741",  # ambiguous variable name (we use single-letter regs etc.)
+    "B008",  # function call in default argument — used in CLI parsers
+]

@@ -1,0 +1,58 @@
+# Dependabot configuration — keeps Python deps and GitHub Action versions
+# patched. Grouped updates batch related ecosystem bumps so the PR queue
+# doesn't fan out to one bot PR per dep per week.
+#
+# Reference: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+
+updates:
+  # pyproject.toml runtime + dev dependencies.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "deps(pip)"
+    groups:
+      # Bundle the dev-only tools together so a black/ruff/pyright bump
+      # is one PR instead of three.
+      dev-tools:
+        applies-to: version-updates
+        patterns:
+          - "black"
+          - "ruff"
+          - "pyright"
+          - "pytest"
+          - "pytest-cov"
+      # Anything else (runtime deps like vice-driver) gets its own PR.
+    ignore:
+      # Pin python-version upgrades to the matrix in ci.yml — those move
+      # in lockstep with our CI matrix, not Dependabot.
+      - dependency-name: "python"
+
+  # GitHub Actions used in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns:
+          - "*"

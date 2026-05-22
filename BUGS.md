@@ -1,0 +1,205 @@
+# Known bugs and rough edges
+
+A non-exhaustive list of issues that future contributors can pick up.
+Each entry tries to capture the symptom, the smallest reproduction, and
+where in the codebase to start looking.
+
+## Multi-modifier chord taps intermittently dropped
+
+**Where:** `defmon_driver.defmon._cycle_until`, callers of
+`Defmon.toggle_stereo` / `Defmon.switch_sid_chip` / `Defmon.cycle_sid_high_byte`.
+
+**Symptom:** Back-to-back CTRL+CBM+* or CBM+SHIFT+* chords occasionally
+fail to register a state-byte change — the matrix tap is observed but
+defMON's chord handler does not run. The current code defends against
+this with a retry loop (`STEREO_CHORD_RETRIES`) plus a CTRL+RETURN/F7
+quiesce before each tap.
+
+**What's missing:** A reliable root cause. The retries hide the
+behaviour but do not prevent the lost tap. A diagnostic that captures
+defMON's debounce / modifier-flag bytes at the moment a chord is
+silently dropped would be valuable.
+
+## ~~seqED V0 / V2 sidCALL1 is unstable~~ (FIXED)
+
+**Where:** `defmon_driver.field_setter.set_field(sub_field="sidcall1")`.
+
+**Root cause:** Two compounding bugs.
+
+1. `position_cursor`'s ``mem_set`` of ``$71CD`` (voice selector) did
+   not stick because defMON's main loop actively restores ``$71CD``
+   from the visible-cursor state every editor-loop iteration. The set
+   needs to happen inside a halted block, and the cursor must be
+   re-seeded between successive digit presses or the second press
+   lands on a different voice than the first.
+2. `read_cell` / `write_cell_direct` / chord-driven `set_field` fell
+   back to the legacy ``cell_address`` helper for V0/V1/V2 when
+   ``arranger_row=None``. That helper assumes V0/V1/V2 all reference
+   pattern 0 at ``$1F00`` with a 12-byte step stride, which is
+   empirically false even on a freshly booted ``defmon-20201008.d64``
+   (V0 → pat 1 at ``$1F80``, V1/V2 → pat 0 at ``$1F00``). The
+   reported address didn't match where defMON actually wrote, so
+   verification always failed even when the write had succeeded.
+
+**Fix:** ``keyhandler.Sid2Chord`` accepts voices 0..5 and re-seeds
+``$71CD`` / ``$71D2`` before every press inside the halted block.
+``set_field``, ``write_cell_direct`` and ``read_cell`` now resolve all
+cells via ``runtime_cell_address`` unconditionally. The chord and
+mismatch hypothesis in the original BUGS.md entry (CBM+SHIFT+digit,
+V1 reliable, asymmetry in $B396) was incorrect — the actual chord is
+CBM+digit and the writer is voice-symmetric.
+
+**Smoke:** ``python -m defmon_driver.smoke_sidcall`` exercises
+sidcall1 across V0/V1/V2 × step 0/3/7 × value 0x00/0x57/0xAB/0xFF and
+PASSes 36/36.
+
+## Byte-granularity coverage installs slowly
+
+**Where:** `vice_driver.coverage.Coverage(granularity="byte")`.
+
+**Symptom:** Installing 45,000+ per-byte CHECK_EXEC checkpoints across
+the player / dispatcher / sidTAB / disk-menu / encoder bands takes ~11
+seconds under `bm.halted()` — but the matching `remove()` is *15×*
+slower (~150-200 ms per delete versus ~0.25 ms per install). On a full
+sweep across all example tunes the teardown is the dominant cost.
+
+**Mitigation:** The current code accepts a `drop_only=True` flag on
+`remove()` that skips the VICE round-trips and only clears the Python-
+side checknum map. Callers that immediately tear the container down
+should pass it.
+
+**What's missing:** A patch to asid-vice's checkpoint-delete fast path
+(symmetric with the insert path) so `drop_only` is no longer needed.
+
+## `silent=True` checkpoints still throttle warp emulation
+
+**Where:** `vice_driver.binmon.BinMon.checkpoint_set(silent=True)`.
+
+**Symptom:** Even with the `silent` flag set, installing many thousands
+of watchpoints adds noticeable per-instruction overhead to warp
+emulation — at ~6000 silent watchpoints, VICE's warp playback wedges
+behind a backlog of internal events.
+
+**Workaround:** Install large watchpoint sets *before* booting defMON
+(during the initial halt), not after, so the warp-mode IRQ stream isn't
+running through them.
+
+**What's missing:** A VICE-side change that truly eliminates the per-
+instruction comparison cost when every watchpoint is silent.
+
+## `Defmon.wait_for_defmon_loaded` is timing-sensitive
+
+**Where:** `defmon_driver.defmon.Defmon.wait_for_defmon_loaded`.
+
+**Symptom:** Under heavy host load, the boot screen scrape can race
+defMON's splash → seqED transition and return early. Callers that
+immediately tap a chord can see it fire against the still-running
+splash code.
+
+**Mitigation:** `tune_navigation.cursor_load_tune` polls for `VOC0` /
+`VOC1` / `VOC2` markers and retries — use it instead of opening the
+disk menu directly after `wait_for_defmon_loaded`.
+
+**What's missing:** A more robust boot-complete detector (e.g. polling
+the mode byte `$7167` for seqED ($01) directly).
+
+## Non-warp tap timing is untested
+
+**Where:** `defmon_driver.defmon.Defmon.DEFAULT_TAP_FRAMES = 12`.
+
+**Symptom:** The 12-frame fixed tap is calibrated for warp-mode
+playback (`-warp` is set by default in `ViceContainer`). Running with
+`warp=False` may produce flaky chord recognition — the constant has
+not been re-tuned for real-time playback.
+
+**What's missing:** A small calibration script that bisects
+`DEFAULT_TAP_FRAMES` against `cia1_reads_sampling` on the non-warp
+path, and either a `Defmon.set_realtime()` helper or auto-detection
+based on the container's `warp` flag.
+
+## `text_to_chords` covers only the basic ASCII subset
+
+**Where:** `vice_driver.keys.text_to_chords`.
+
+**Symptom:** Characters with no single-key (optionally with shift) matrix
+path — e.g. backtick, vertical bar, curly braces — raise `KeyError`.
+defMON file-name input is restricted to PETSCII so this is rarely a
+practical limit, but it's a sharp edge.
+
+**What's missing:** A clearer error message that lists the characters
+that *are* supported, or an option to substitute `?` for unmappable
+characters.
+
+## Coverage page attribution misses sub-page granularity
+
+**Where:** `vice_driver.coverage.Coverage(granularity="page")`.
+
+**Symptom:** Page-granular coverage gives one hit per 256-byte page,
+which is enough to identify hot bands but not enough to pin down which
+specific routine inside a page was hit. The cpuhistory drain partially
+compensates but is lossy under the warp-mode player IRQ.
+
+**Workaround:** Pass `granularity="byte"` (slower, see above) when
+you need per-PC resolution.
+
+**What's missing:** A hybrid mode that starts at page-granularity and
+adaptively subdivides pages whose hit count crosses a threshold.
+
+## The sidTAB calibration JSON path is implicit in many smokes
+
+**Where:** `defmon_driver.smoke_sidtab`,
+`defmon_driver.sidtab.SidTab.from_calibration`.
+
+**Symptom:** The smoke defaults to `sidtab_calibration.json` in the
+working directory. If a caller forgets to first run
+`calibrate_sidtab`, the smoke fails with a `FileNotFoundError` rather
+than a helpful "run the calibration step first" message.
+
+**What's missing:** Either a `--auto-calibrate` flag on
+`smoke_sidtab`, or a clearer error message that suggests the
+calibration command.
+
+## `tune_manifest.TUNES` only covers `defmon-withtunes.d64`
+
+**Where:** `defmon_driver.tune_manifest.TUNES`.
+
+**Symptom:** Although the README documents two example disk images
+(`defmon-20201008.d64` and `defmon-withtunes.d64`), `TUNES` only has
+entries for the second one. Callers using
+`tunes_for_image("defmon-20201008.d64")` get an empty tuple back with
+no warning, so a smoke that selects by image silently runs zero
+iterations.
+
+**What's missing:** A second manifest pass for `defmon-20201008.d64`
+(or, if that image really has no tune entries, an explicit comment
+saying so plus a unit-test assertion that documents the choice).
+
+## `tune_navigation` swallows the original exception type on retry
+
+**Where:** `defmon_driver.tune_navigation.cursor_load_tune`.
+
+**Symptom:** The retry loop catches `Exception` and re-raises as
+`DefmonError`, so callers writing `except RuntimeError:` /
+`except ConnectionResetError:` etc. lose the ability to discriminate
+on the original cause. The original is preserved in the log but not
+chained.
+
+**What's missing:** Use `raise DefmonError(...) from last_err` so the
+chain is visible at the call site (and in pytest output).
+
+## `Defmon.all_documented_actions` mixes `TapOutcome`-returning and
+   `None`-returning methods
+
+**Where:** `defmon_driver.defmon.Defmon.all_documented_actions`.
+
+**Symptom:** Six `super_*` helpers (`super_steps_4` etc.) return
+`None`; the other ~35 actions return `TapOutcome`. Callers that
+iterate the list naively (e.g. `outcome.release_reason`) crash with
+`AttributeError` on the None branch. `smoke.py` had this latent bug
+until recently; the signature is now correctly typed as
+`Callable[[], TapOutcome | None]` but the surface is still asymmetric.
+
+**What's missing:** Either split the index into two functions
+(`all_single_tap_actions` vs `all_multi_step_actions`) or have the
+multi-step helpers return a synthetic `TapOutcome` describing the
+last tap they issued, so the index is uniform.

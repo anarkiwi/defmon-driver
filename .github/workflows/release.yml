@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install build + twine
+        run: |
+          python -m pip install --upgrade pip
+          pip install build "twine>=5" "packaging>=24.2"
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          # Read _version.py directly so we don't trigger defmon_driver/__init__.py,
+          # which imports vice_driver (not installed in this job).
+          pkg=$(python -c "import runpy; print(runpy.run_path('defmon_driver/_version.py')['__version__'])")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag v$tag does not match package version $pkg" >&2
+            exit 1
+          fi
+      - name: Build
+        run: python -m build
+      - name: Twine check
+        run: python -m twine check dist/*
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/defmon-driver/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish via trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
