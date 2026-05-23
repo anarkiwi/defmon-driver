@@ -8,10 +8,12 @@ still pre-stable, so breaking changes can land in minor bumps.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-23
+
 ### Changed
 
 - **Split shared transport/emulator-control code into the `vice-driver`
-  package.** `defmon-driver` now depends on `vice-driver>=0.1.0`. The
+  package.** `defmon-driver` now depends on `vice-driver>=0.2.0`. The
   modules `defmon_driver.binmon`, `defmon_driver.keys`,
   `defmon_driver.screen`, `defmon_driver.vice_docker`, and
   `defmon_driver.coverage` have been removed; their content lives in

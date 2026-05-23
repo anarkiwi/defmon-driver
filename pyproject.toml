@@ -44,7 +44,7 @@ classifiers = [
 # The asid-vice container is a separate runtime concern that the user
 # spins up via Docker.
 dependencies = [
-    "vice-driver>=0.1.0",
+    "vice-driver>=0.2.0",
 ]
 
 [project.optional-dependencies]

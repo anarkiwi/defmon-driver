@@ -74,7 +74,7 @@ def test_checkpoint_lifecycle(bm: BinMon, d: Defmon) -> list[str]:
     print(f"  after F1: hit_count={after.hit_count}")
     if after.hit_count == 0:
         failures.append(
-            "checkpoint never fired after F1 — player range wrong, or " "checkpoint plumbing broken"
+            "checkpoint never fired after F1 — player range wrong, or checkpoint plumbing broken"
         )
 
     # Stop playback so we don't keep filling cpuhistory with player loop.

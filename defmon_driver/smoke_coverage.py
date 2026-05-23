@@ -129,8 +129,7 @@ def run(d64_path: Path, port: int) -> int:
             # problem, not ours — but we shouldn't have added to it.
             remaining = bm.checkpoint_list()
             print(
-                f"  after remove(): {len(remaining)} checkpoint(s) live "
-                f"({len(pre)} pre-existing)"
+                f"  after remove(): {len(remaining)} checkpoint(s) live ({len(pre)} pre-existing)"
             )
             if len(remaining) > len(pre):
                 failures.append(f"leak: {len(remaining)} > {len(pre)} pre-existing")
