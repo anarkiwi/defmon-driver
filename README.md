@@ -33,7 +33,8 @@ field setters, sidTAB calibration, tune navigation, etc.).
 ## Requirements
 
 * Python ≥ 3.10
-* Docker, with a built `asid-vice:latest` image — see
+* Docker, with the published `anarkiwi/asid-vice:latest` image (pulled
+  automatically on first run, or `docker pull anarkiwi/asid-vice:latest`) — see
   [`anarkiwi/asid-vice`](https://github.com/anarkiwi/asid-vice) for the
   Dockerfile and build instructions.
 * A defMON-formatted `.d64` disk image (e.g. `defmon-20201008.d64` or
