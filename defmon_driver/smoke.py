@@ -14,7 +14,7 @@ Drives a real asid-vice container against a defMON disk image:
      the tap timing out.
   6. Stop the container and print a one-line PASS/FAIL summary.
 
-This test requires Docker + an ``asid-vice:latest`` image on the host;
+This test requires Docker + an ``anarkiwi/asid-vice:latest`` image on the host;
 it is **not** part of the unit-test suite that runs in CI. See
 ``README.md`` for how to build the asid-vice image.
 
@@ -61,8 +61,9 @@ def make_blank_d64(path: Path, name: str = "WORK", c1541: str = "c1541") -> bool
             "host c1541 format failed (%s); falling through to container",
             r.stderr.strip(),
         )
-    # Container fallback. The image contains c1541 but its ENTRYPOINT is x64sc;
-    # override with --entrypoint to run c1541 instead.
+    # Container fallback. The image contains c1541 but the published image's
+    # ENTRYPOINT is an Xvfb wrapper; --entrypoint c1541 overrides it to run the
+    # disk formatter (c1541 is a CLI tool needing no X server).
     r = subprocess.run(
         [
             "docker",
@@ -72,7 +73,7 @@ def make_blank_d64(path: Path, name: str = "WORK", c1541: str = "c1541") -> bool
             "c1541",
             "-v",
             f"{path.parent.absolute()}:/work",
-            "asid-vice:latest",
+            "anarkiwi/asid-vice:latest",
             "-format",
             f"{name},01",
             "d64",

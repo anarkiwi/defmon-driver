@@ -8,6 +8,15 @@ still pre-stable, so breaking changes can land in minor bumps.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-13
+
+### Changed
+
+- Require `vice-driver>=0.4.0`.
+- Use the published `anarkiwi/asid-vice:latest` image: the container is
+  now pulled from Docker Hub rather than built locally, and its entrypoint
+  auto-starts Xvfb so binmon driving needs no host X server.
+
 ## [0.3.0] - 2026-05-23
 
 ### Changed
