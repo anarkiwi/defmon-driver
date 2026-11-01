@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Python automation framework for driving defMON (a Commodore 64 cross-platform music editor) inside asid-vice via the binary monitor."
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "anarkiwi" },
 ]
@@ -32,7 +32,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio",
@@ -110,13 +109,13 @@ skip_covered = false
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py311", "py312"]
 # Keep black aligned with ruff's line-length; both tools format the
 # same code so a divergence on width would create a fight loop.
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 # Keep the rule set conservative — the driver's docstrings are dense
